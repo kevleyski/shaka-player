@@ -1480,33 +1480,6 @@ shakaAssets.testAssets = [
   // }}}
 
   // MPEG-5 LCEVC assets {{{
-  /* LCEVC Enabled Content with LCEVC Encoded Stream */
-  new ShakaDemoAssetInfo(
-      /* name= */ 'Big Buck Bunny (LCEVC H264)',
-      /* iconUri= */ 'https://storage.googleapis.com/shaka-asset-icons/big_buck_bunny.png',
-      /* manifestUri= */ 'https://dyctis843rxh5.cloudfront.net/vnIAZIaowG1K7qOt/master.m3u8',
-      /* source= */ shakaAssets.Source.VNOVA)
-      .addFeature(shakaAssets.Feature.HLS)
-      .addFeature(shakaAssets.Feature.HIGH_DEFINITION)
-      .addFeature(shakaAssets.Feature.MP4)
-      .addFeature(shakaAssets.Feature.WEBM)
-      .addFeature(shakaAssets.Feature.OFFLINE)
-      .addDescription('H264 HLS stream with LCEVC enhancement')
-      .markAsFeatured('Big Buck Bunny (LCEVC H264)')
-      .setExtraConfig({
-        streaming: {
-          useNativeHlsOnSafari: false,
-          forceTransmuxTS: true,
-        },
-        lcevc: {
-          dynamicPerformanceScaling: true,
-          logLevel: 0,
-          drawLogo: false,
-        },
-      }),
-  // }}}
-
-  // MPEG-5 LCEVC assets {{{
   /* LCEVC Enhanced Contents */
   new ShakaDemoAssetInfo(
       /* name= */ 'Big Buck Bunny LCEVC H264 (DASH, MP4)',
