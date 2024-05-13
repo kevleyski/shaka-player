@@ -38,7 +38,16 @@ describe('DashParser SegmentBase', () => {
       isLowLatencyMode: () => false,
       isAutoLowLatencyMode: () => false,
       enableLowLatencyMode: () => {},
+      updateDuration: () => {},
+      newDrmInfo: (stream) => {},
+      onManifestUpdated: () => {},
+      getBandwidthEstimate: () => 1e6,
     };
+  });
+
+  afterEach(() => {
+    // Dash parser stop is synchronous.
+    parser.stop();
   });
 
   it('requests init data for WebM', async () => {
@@ -85,13 +94,13 @@ describe('DashParser SegmentBase', () => {
 
     // Expect calls to fetch part of the media and init segments of each stream.
     fakeNetEngine.expectRangeRequest(
-        'http://example.com/media-1.webm', 100, 200);
+        'http://example.com/media-1.webm', 100, 200, /* isInit= */ false);
     fakeNetEngine.expectRangeRequest(
-        'http://example.com/init-1.webm', 201, 300);
+        'http://example.com/init-1.webm', 201, 300, /* isInit= */ true);
     fakeNetEngine.expectRangeRequest(
-        'http://example.com/media-2.webm', 1100, 1200);
+        'http://example.com/media-2.webm', 1100, 1200, /* isInit= */ false);
     fakeNetEngine.expectRangeRequest(
-        'http://example.com/init-2.webm', 1201, 1300);
+        'http://example.com/init-2.webm', 1201, 1300, /* isInit= */ true);
   });
 
   it('inherits from Period', async () => {
@@ -123,7 +132,8 @@ describe('DashParser SegmentBase', () => {
     expect(initSegmentReference.getEndByte()).toBe(300);
 
     expect(fakeNetEngine.request).toHaveBeenCalledTimes(2);
-    fakeNetEngine.expectRangeRequest('http://example.com', 100, 200);
+    fakeNetEngine.expectRangeRequest(
+        'http://example.com', 100, 200, /* isInit= */ false);
   });
 
   it('inherits from AdaptationSet', async () => {
@@ -155,7 +165,8 @@ describe('DashParser SegmentBase', () => {
     expect(initSegmentReference.getEndByte()).toBe(300);
 
     expect(fakeNetEngine.request).toHaveBeenCalledTimes(2);
-    fakeNetEngine.expectRangeRequest('http://example.com', 100, 200);
+    fakeNetEngine.expectRangeRequest(
+        'http://example.com', 100, 200, /* isInit= */ false);
   });
 
   it('does not require sourceURL in Initialization', async () => {
@@ -188,7 +199,8 @@ describe('DashParser SegmentBase', () => {
     expect(initSegmentReference.getEndByte()).toBe(300);
 
     expect(fakeNetEngine.request).toHaveBeenCalledTimes(2);
-    fakeNetEngine.expectRangeRequest('http://example.com/stream.mp4', 100, 200);
+    fakeNetEngine.expectRangeRequest(
+        'http://example.com/stream.mp4', 100, 200, /* isInit= */ false);
   });
 
   it('merges across levels', async () => {
@@ -228,7 +240,8 @@ describe('DashParser SegmentBase', () => {
     expect(segmentReference.timestampOffset).toBe(-10);
 
     expect(fakeNetEngine.request).toHaveBeenCalledTimes(2);
-    fakeNetEngine.expectRangeRequest('http://example.com/index.mp4', 5, 2000);
+    fakeNetEngine.expectRangeRequest(
+        'http://example.com/index.mp4', 5, 2000, /* isInit= */ false);
   });
 
   it('merges and overrides across levels', async () => {
@@ -267,7 +280,8 @@ describe('DashParser SegmentBase', () => {
     expect(segmentReference.timestampOffset).toBe(-20);
 
     expect(fakeNetEngine.request).toHaveBeenCalledTimes(2);
-    fakeNetEngine.expectRangeRequest('http://example.com', 30, 900);
+    fakeNetEngine.expectRangeRequest(
+        'http://example.com', 30, 900, /* isInit= */ false);
   });
 
   it('does not assume the same timescale as media', async () => {

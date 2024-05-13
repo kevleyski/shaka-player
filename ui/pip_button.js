@@ -16,7 +16,6 @@ goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.OverflowMenu');
 goog.require('shaka.ui.Utils');
 goog.require('shaka.util.Dom');
-goog.require('shaka.util.FakeEvent');
 goog.requireType('shaka.ui.Controls');
 
 
@@ -35,6 +34,9 @@ shaka.ui.PipButton = class extends shaka.ui.Element {
 
     /** @private {HTMLMediaElement} */
     this.localVideo_ = this.controls.getLocalVideo();
+
+    /** @private {HTMLElement } */
+    this.videoContainer_ = this.controls.getVideoContainer();
 
     const LocIds = shaka.ui.Locales.Ids;
     /** @private {!HTMLButtonElement} */
@@ -70,7 +72,7 @@ shaka.ui.PipButton = class extends shaka.ui.Element {
     // Don't display the button if PiP is not supported or not allowed.
     // TODO: Can this ever change? Is it worth creating the button if the below
     // condition is true?
-    if (!this.isPipAllowed_()) {
+    if (!this.controls.isPiPAllowed()) {
       shaka.ui.Utils.setDisplay(this.pipButton_, false);
     }
 
@@ -85,7 +87,7 @@ shaka.ui.PipButton = class extends shaka.ui.Element {
         });
 
     this.eventManager.listen(this.pipButton_, 'click', () => {
-      this.onPipClick_();
+      this.controls.togglePiP();
     });
 
     this.eventManager.listen(this.localVideo_, 'enterpictureinpicture', () => {
@@ -96,47 +98,27 @@ shaka.ui.PipButton = class extends shaka.ui.Element {
       this.onLeavePictureInPicture_();
     });
 
-    this.eventManager.listen(this.controls, 'caststatuschanged', (e) => {
-      this.onCastStatusChange_(e);
+    this.eventManager.listen(this.controls, 'caststatuschanged', () => {
+      this.onTracksChanged_();
     });
 
     this.eventManager.listen(this.player, 'trackschanged', () => {
       this.onTracksChanged_();
     });
-  }
 
+    if ('documentPictureInPicture' in window) {
+      this.eventManager.listen(window.documentPictureInPicture, 'enter',
+          (e) => {
+            this.onEnterPictureInPicture_();
 
-  /**
-   * @return {boolean}
-   * @private
-   */
-  isPipAllowed_() {
-    return document.pictureInPictureEnabled &&
-        !this.video.disablePictureInPicture;
-  }
-
-
-  /**
-   * @return {!Promise}
-   * @private
-   */
-  async onPipClick_() {
-    try {
-      if (!document.pictureInPictureElement) {
-        // If you were fullscreen, leave fullscreen first.
-        if (document.fullscreenElement) {
-          document.exitFullscreen();
-        }
-        await this.video.requestPictureInPicture();
-      } else {
-        await document.exitPictureInPicture();
-      }
-    } catch (error) {
-      this.controls.dispatchEvent(new shaka.util.FakeEvent(
-          'error', (new Map()).set('detail', error)));
+            const event = /** @type {DocumentPictureInPictureEvent} */(e);
+            const pipWindow = event.window;
+            this.eventManager.listenOnce(pipWindow, 'pagehide', () => {
+              this.onLeavePictureInPicture_();
+            });
+          });
     }
   }
-
 
   /** @private */
   onEnterPictureInPicture_() {
@@ -169,35 +151,17 @@ shaka.ui.PipButton = class extends shaka.ui.Element {
     this.pipNameSpan_.textContent =
       this.localization.resolve(LocIds.PICTURE_IN_PICTURE);
 
-    const ariaLabel = document.pictureInPictureElement ?
+    const enabled = this.controls.isPiPEnabled();
+
+    const ariaLabel = enabled ?
         LocIds.EXIT_PICTURE_IN_PICTURE :
         LocIds.ENTER_PICTURE_IN_PICTURE;
     this.pipButton_.ariaLabel = this.localization.resolve(ariaLabel);
 
-    const currentPipState = document.pictureInPictureElement ?
-        LocIds.ON : LocIds.OFF;
+    const currentPipState = enabled ? LocIds.ON : LocIds.OFF;
 
     this.currentPipState_.textContent =
         this.localization.resolve(currentPipState);
-  }
-
-  /**
-   * @param {Event} e
-   * @private
-   */
-  onCastStatusChange_(e) {
-    const isCasting = e['newStatus'];
-
-    if (isCasting) {
-      // Picture-in-picture is not applicable if we're casting
-      if (this.isPipAllowed_()) {
-        shaka.ui.Utils.setDisplay(this.pipButton_, false);
-      }
-    } else {
-      if (this.isPipAllowed_()) {
-        shaka.ui.Utils.setDisplay(this.pipButton_, true);
-      }
-    }
   }
 
 
@@ -209,12 +173,15 @@ shaka.ui.PipButton = class extends shaka.ui.Element {
    * @private
    */
   async onTracksChanged_() {
-    if (!this.isPipAllowed_()) {
+    if (!this.controls.isPiPAllowed()) {
       shaka.ui.Utils.setDisplay(this.pipButton_, false);
+      if (this.controls.isPiPEnabled()) {
+        await this.controls.togglePiP();
+      }
     } else if (this.player && this.player.isAudioOnly()) {
       shaka.ui.Utils.setDisplay(this.pipButton_, false);
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
+      if (this.controls.isPiPEnabled()) {
+        await this.controls.togglePiP();
       }
     } else {
       shaka.ui.Utils.setDisplay(this.pipButton_, true);

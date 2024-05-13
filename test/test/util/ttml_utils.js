@@ -31,7 +31,7 @@ shaka.test.TtmlUtils = class {
 
     /**
      * @param {!Object} properties
-     * @return {!shaka.extern.Cue}
+     * @return {!shaka.text.Cue}
      */
     const makeContainer = (properties) => {
       const region = {
@@ -47,12 +47,10 @@ shaka.test.TtmlUtils = class {
         viewportAnchorUnits: shaka.text.CueRegion.units.PERCENTAGE,
         scroll: '',
       };
-      const containerCue = /** @type {!shaka.extern.Cue} */ ({
+      const containerCue = /** @type {!shaka.text.Cue} */ ({
         region,
         nestedCues: jasmine.any(Object),
         payload: '',
-        startTime: 0,
-        endTime: Infinity,
         isContainer: true,
       });
       Object.assign(containerCue, properties);

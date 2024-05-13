@@ -23,7 +23,10 @@ shaka.test.FakeAdManager = class extends shaka.util.FakeEventTarget {
   setLocale(locale) {}
 
   /** @override */
-  initClientSide(adContainer, video) {}
+  configure(config) {}
+
+  /** @override */
+  initClientSide(adContainer, video, adsRenderingSettings) {}
 
   /** @override */
   onAssetUnload() {}
@@ -32,6 +35,20 @@ shaka.test.FakeAdManager = class extends shaka.util.FakeEventTarget {
   requestClientSideAds(imaRequest) {
     return Promise.resolve('fake:url');
   }
+
+  /** @override */
+  updateClientSideAdsRenderingSettings(adsRenderingSettings) {}
+
+  /** @override */
+  initMediaTailor(networkingEngine, video) {}
+
+  /** @override */
+  requestMediaTailorStream(url, adsParams, backupUrl) {
+    return Promise.resolve('fake:url');
+  }
+
+  /** @override */
+  addMediaTailorTrackingUrl(url) {}
 
   /** @override */
   initServerSide(adContainer, video) {}
@@ -51,10 +68,22 @@ shaka.test.FakeAdManager = class extends shaka.util.FakeEventTarget {
     return [];
   }
 
+  /**
+   * @override
+   */
+  getCuePoints() {
+    return [];
+  }
+
   /** @override */
   getStats() {
     return this.stats_;
   }
+
+  /**
+   * @override
+   */
+  onManifestUpdated(isLive) {}
 
   /**
    * @override

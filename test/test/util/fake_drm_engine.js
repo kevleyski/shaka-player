@@ -81,6 +81,9 @@ shaka.test.FakeDrmEngine = class {
     /** @type {!jasmine.Spy} */
     this.supportsVariant = jasmine.createSpy('supportsVariant');
     this.supportsVariant.and.returnValue(true);
+
+    /** @type {!jasmine.Spy} */
+    this.setSrcEquals = jasmine.createSpy('setSrcEquals');
   }
 
   /**
@@ -96,5 +99,12 @@ shaka.test.FakeDrmEngine = class {
   setSessionIds(sessions) {
     // Copy the values to break the reference to the input value.
     this.offlineSessions_ = sessions.map((s) => s);
+  }
+
+  /**
+   * @override
+   */
+  hasManifestInitData() {
+    return true;
   }
 };

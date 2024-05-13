@@ -61,17 +61,25 @@ The following elements can be added to the UI bar using this configuration value
   starts playing the presentation at an increased speed
 * spacer: adds a chunk of empty space between the adjacent elements.
 * picture_in_picture: adds a button that enables/disables picture-in-picture mode on browsers
-  that support it. Button is invisible on other browsers.
+  that support it. Button is invisible on other browsers. Note that it will use the
+  [Document Picture-in-Picture API]() if supported.
 * loop: adds a button that controls if the currently selected video is played in a loop.
 * airplay: adds a button that opens a AirPlay dialog. The button is visible only if the browser
   supports AirPlay.
 * cast: adds a button that opens a Chromecast dialog. The button is visible only if there is
   at least one Chromecast device on the same network available for casting.
+* remote: adds a button that opens a Remote Playback dialog. The button is visible only if the
+  browser supports Remote Playback API.
 * quality: adds a button that controls enabling/disabling of abr and video resolution selection.
 * language: adds a button that controls audio language selection.
 * playback_rate: adds a button that controls the playback rate selection.
 * captions: adds a button that controls the current text track selection (including turning it off).
+* recenter_vr: adds a button that recenter the VR view to the initial view. The button is visible
+  only if playing a VR content.
+* toggle_stereoscopic: adds a button that toggle between monoscopic and stereoscopic. The button
+  is visible only if playing a VR content.
 <!-- TODO: If we add more buttons that can be put in the order this way, list them here. -->
+[Document Picture-in-Picture API]: https://developer.chrome.com/docs/web-platform/document-picture-in-picture/
 
 Similarly, the 'overflowMenuButtons' configuration option can be used to control
 the contents of the overflow menu.
@@ -83,12 +91,19 @@ The following buttons can be added to the overflow menu:
 * quality: adds a button that controls enabling/disabling of abr and video resolution selection.
 * language: adds a button that controls audio language selection.
 * picture_in_picture: adds a button that enables/disables picture-in-picture mode on browsers
-  that support it. Button is invisible on other browsers.
+  that support it. Button is invisible on other browsers. Note that it will use the 
+  [Document Picture-in-Picture API]() if supported.
 * loop: adds a button that controls if the currently selected video is played in a loop.
 * playback_rate: adds a button that controls the playback rate selection.
 * airplay: adds a button that opens a AirPlay dialog. The button is visible only if the browser
   supports AirPlay.
+* remote: adds a button that opens a Remote Playback dialog. The button is visible only if the
+  browser supports Remote Playback API.
 * Statistics: adds a button that displays statistics of the video.
+* recenter_vr: adds a button that recenter the VR view to the initial view. The button is visible
+  only if playing a VR content.
+* toggle_stereoscopic: adds a button that toggle between monoscopic and stereoscopic. The button
+  is visible only if playing a VR content.
 <!-- TODO: If we add more buttons that can be put in the order this way, list them here. -->
 
 Example:
@@ -122,7 +137,8 @@ The following buttons can be added to the context menu:
 * Statistics: adds a button that displays statistics of the video.
 * loop: adds a button that controls if the currently selected video is played in a loop.
 * picture_in_picture: adds a button that enables/disables picture-in-picture mode on browsers
-  that support it. Button is invisible on other browsers.
+  that support it. Button is invisible on other browsers. Note that it will use the 
+  [Document Picture-in-Picture API]() if supported.
 
 Example:
 ```js
@@ -266,7 +282,31 @@ PR contributions to [the gallery repo][] are welcome.
 [pre-packaged Shaka UI themes]: https://lucksy.github.io/shaka-player-themes/
 [the gallery repo]: https://github.com/lucksy/shaka-player-themes
 
+#### Add custom localization
 
-#### Continue the Tutorials
+Load specific locale data at runtime (adjust the URL and language as needed):
+```js
+const locale = 'el';
+const controls = ui.getControls();
+const localization = controls.getLocalization();
+const response = await fetch('ui/locales/' + locale + '.json');     // <----- JSON translation URL here
+const translations = await response.json();
+const translation_map = new Map(Object.entries(translations));
+localization.insert(locale, translation_map);
+```
 
-Next, check out {@tutorial a11y} to make your custom buttons accessible to screen readers.
+Lazy-load any requested locale data at runtime (adjust the URL as needed):
+```js
+const controls = ui.getControls();
+const localization = controls.getLocalization();
+
+localization.addEventListener('unknown-locales', async (e) => {
+  for (const locale of e.locales) {
+    const response = await fetch('ui/locales/' + locale + '.json');     // <----- JSON translation URL here
+    const translations = await response.json();
+    const translation_map = new Map(Object.entries(translations));
+    localization.insert(locale, translation_map);
+  }
+});
+```
+

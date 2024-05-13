@@ -43,12 +43,20 @@ shaka.test.Dash = class {
       isLowLatencyMode: () => false,
       isAutoLowLatencyMode: () => false,
       enableLowLatencyMode: () => {},
+      updateDuration: () => {},
+      newDrmInfo: (stream) => {},
+      onManifestUpdated: () => {},
+      getBandwidthEstimate: () => 1e6,
     };
-    const manifest = await dashParser.start('dummy://foo', playerInterface);
-    const stream = manifest.variants[0].video;
-    await stream.createSegmentIndex();
+    try {
+      const manifest = await dashParser.start('dummy://foo', playerInterface);
+      const stream = manifest.variants[0].video;
+      await stream.createSegmentIndex();
 
-    shaka.test.ManifestParser.verifySegmentIndex(stream, references);
+      shaka.test.ManifestParser.verifySegmentIndex(stream, references);
+    } finally {
+      dashParser.stop();
+    }
   }
 
   /**
@@ -77,10 +85,19 @@ shaka.test.Dash = class {
       isLowLatencyMode: () => false,
       isAutoLowLatencyMode: () => false,
       enableLowLatencyMode: () => {},
+      updateDuration: () => {},
+      newDrmInfo: (stream) => {},
+      onManifestUpdated: () => {},
+      getBandwidthEstimate: () => 1e6,
     };
-    const p = dashParser.start('dummy://foo', playerInterface);
-    await expectAsync(p).toBeRejectedWith(
-        shaka.test.Util.jasmineError(expectedError));
+
+    try {
+      const p = dashParser.start('dummy://foo', playerInterface);
+      await expectAsync(p).toBeRejectedWith(
+          shaka.test.Util.jasmineError(expectedError));
+    } finally {
+      dashParser.stop();
+    }
   }
 
   /**

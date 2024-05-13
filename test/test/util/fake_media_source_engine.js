@@ -55,6 +55,9 @@ shaka.test.FakeMediaSourceEngine = class {
     this.open = jasmine.createSpy('open').and.returnValue(Promise.resolve());
 
     /** @type {!jasmine.Spy} */
+    this.configure = jasmine.createSpy('configure').and.stub();
+
+    /** @type {!jasmine.Spy} */
     this.reinitText = jasmine.createSpy('reinitText').and.stub();
 
     /** @type {!jasmine.Spy} */
@@ -131,13 +134,22 @@ shaka.test.FakeMediaSourceEngine = class {
         jasmine.createSpy('setSegmentRelativeVttTiming').and.stub();
 
     /** @type {!jasmine.Spy} */
-    this.updateLcevcDil =
-        jasmine.createSpy('updateLcevcDil').and.stub();
+    this.updateLcevcDec =
+        jasmine.createSpy('updateLcevcDec').and.stub();
+
+    /** @type {!jasmine.Spy} */
+    this.resync=
+        jasmine.createSpy('resync').and.stub();
   }
 
   /** @override */
   destroy() {
     return Promise.resolve();
+  }
+
+  /** @override */
+  isStreamingAllowed() {
+    return true;
   }
 
   /**
@@ -332,6 +344,12 @@ shaka.test.FakeMediaSourceEngine = class {
     }
 
     return Promise.resolve();
+  }
+
+
+  /** @override */
+  isResetMediaSourceNecessary() {
+    return false;
   }
 
   /**

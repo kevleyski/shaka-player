@@ -78,6 +78,7 @@ shaka.extern.UIVolumeBarColors;
  *   seekBarColors: shaka.extern.UISeekBarColors,
  *   volumeBarColors: shaka.extern.UIVolumeBarColors,
  *   trackLabelFormat: shaka.ui.Overlay.TrackLabelFormat,
+ *   textTrackLabelFormat: shaka.ui.Overlay.TrackLabelFormat,
  *   fadeDelay: number,
  *   doubleClickForFullscreen: boolean,
  *   singleClickForPlayAndPause: boolean,
@@ -85,7 +86,16 @@ shaka.extern.UIVolumeBarColors;
  *   enableFullscreenOnRotation: boolean,
  *   forceLandscapeOnFullscreen: boolean,
  *   enableTooltips: boolean,
- *   keyboardSeekDistance: number
+ *   keyboardSeekDistance: number,
+ *   keyboardLargeSeekDistance: number,
+ *   fullScreenElement: HTMLElement,
+ *   preferDocumentPictureInPicture: boolean,
+ *   showAudioChannelCountVariants: boolean,
+ *   seekOnTaps: boolean,
+ *   tapSeekDistance: number,
+ *   refreshTickInSeconds: number,
+ *   displayInVrMode: boolean,
+ *   defaultVrProjectionMode: string
  * }}
  *
  * @property {!Array.<string>} controlPanelElements
@@ -141,14 +151,24 @@ shaka.extern.UIVolumeBarColors;
  *   colors used in the linear gradient constructed in JavaScript, since you
  *   cannot do this in pure CSS.
  * @property {shaka.ui.Overlay.TrackLabelFormat} trackLabelFormat
- *   An enum that determines what is shown in the labels for text track and
- *   audio variant selection.
+ *   An enum that determines what is shown in the labels for audio variant
+ *   selection.
  *   LANGUAGE means that only the language of the item is shown.
  *   ROLE means that only the role of the item is shown.
  *   LANGUAGE_ROLE means both language and role are shown, or just language if
  *   there is no role.
- *   LABEL means the non-standard DASH "label" attribute or the HLS "NAME"
- *   attribute are shown.
+ *   LABEL means the non-standard DASH "label" attribute or the standard DASH
+ *   "Label" element or the HLS "NAME" attribute are shown.
+ *   Defaults to LANGUAGE.
+ * @property {shaka.ui.Overlay.TrackLabelFormat} textTrackLabelFormat
+ *   An enum that determines what is shown in the labels for text track
+ *   selection.
+ *   LANGUAGE means that only the language of the item is shown.
+ *   ROLE means that only the role of the item is shown.
+ *   LANGUAGE_ROLE means both language and role are shown, or just language if
+ *   there is no role.
+ *   LABEL means the non-standard DASH "label" attribute or the standard DASH
+ *   "Label" element or the HLS "NAME" attribute are shown.
  *   Defaults to LANGUAGE.
  * @property {number} fadeDelay
  *   The delay (in seconds) before fading out the controls once the user stops
@@ -161,6 +181,7 @@ shaka.extern.UIVolumeBarColors;
  *   Defaults to true.
  * @property {boolean} singleClickForPlayAndPause
  *   Whether or not clicking on the video should cause it to play or pause.
+ *   It does not work in VR mode.
  *   Defaults to true.
  * @property {boolean} enableKeyboardPlaybackControls
  *   Whether or not playback controls via keyboard is enabled, such as seek
@@ -183,6 +204,46 @@ shaka.extern.UIVolumeBarColors;
  *   right keyboard keys when the video is selected. If less than or equal to 0,
  *   no seeking will occur.
  *   Defaults to 5 seconds.
+ * @property {number} keyboardLargeSeekDistance
+ *   The time interval, in seconds, to seek when the user presses the page up or
+ *   page down keyboard keys when the video is selected. If less than or equal
+ *   to 0, no seeking will occur.
+ *   Defaults to 60 seconds.
+ * @property {HTMLElement} fullScreenElement
+ *   DOM element on which fullscreen will be done.
+ *   Defaults to Shaka Player Container.
+ * @property {boolean} preferDocumentPictureInPicture
+ *   Indicates whether the Document Picture in Picture API is preferred or the
+ *   Video Element Picture in Picture API is preferred.
+ *   Changing this property in mid-playback may produce undesired behavior if
+ *   you are already in PiP.
+ *   Defaults to true.
+ * @property {boolean} showAudioChannelCountVariants
+ *   Indicates whether the combination of language and channel count should be
+ *   displayed or if, on the contrary, only the language should be displayed
+ *   regardless of the channel count.
+ *   Defaults to true.
+ * @property {boolean} seekOnTaps
+ *   Indicates whether or not a fast-forward and rewind tap button that seeks
+ *   video some seconds.
+ *   Defaults to true.
+ * @property {number} tapSeekDistance
+ *   The time interval, in seconds, to seek when the user presses the left or
+ *   right part of the video. If less than or equal to 0,
+ *   no seeking will occur.
+ *   Defaults to 10 seconds.
+ * @property {number} refreshTickInSeconds
+ *   The time interval, in seconds, to update the seek bar.
+ *   Defaults to 0.125 seconds.
+ * @property {boolean} displayInVrMode
+ *   If true, the content will be treated as VR.
+ *   If false, it will only be treated as VR if we automatically detect it as
+ *   such. (See the Enabling VR section in docs/tutorials/ui.md)
+ *   Defaults to false.
+ * @property {string} defaultVrProjectionMode
+ *   Indicate the default VR projection mode.
+ *   Possible values: <code>'equirectangular'</code> or <code>'cubemap'</code>.
+ *   Defaults to <code>'equirectangular'</code>.
  * @exportDoc
  */
 shaka.extern.UIConfiguration;
@@ -442,4 +503,28 @@ shaka.extern.IUISeekBar.Factory = class {
    * @return {!shaka.extern.IUISeekBar}
    */
   create(rootElement, controls) {}
+};
+
+/**
+ * @interface
+ * @exportDoc
+ */
+shaka.extern.IUIPlayButton = class {
+  /**
+   * @param {!HTMLElement} parent
+   * @param {!shaka.ui.Controls} controls
+   */
+  constructor(parent, controls) {
+    /**
+     * @protected {!HTMLButtonElement}
+     * @exportDoc
+     */
+    this.button;
+  }
+
+  /** @return {boolean} */
+  isPaused() {}
+
+  /** @return {boolean} */
+  isEnded() {}
 };

@@ -8,6 +8,9 @@ describe('CastUtils', () => {
   const CastUtils = shaka.cast.CastUtils;
   const FakeEvent = shaka.util.FakeEvent;
 
+  /** @type {shaka.extern.Stream} */
+  const fakeStream = shaka.test.StreamingEngineUtil.createMockVideoStream(1);
+
   it('includes every Player member', () => {
     const ignoredMembers = [
       'constructor',  // JavaScript added field
@@ -18,10 +21,15 @@ describe('CastUtils', () => {
       'getMediaElement',  // Handled specially
       'setMaxHardwareResolution',
       'destroy',  // Should use CastProxy.destroy instead
+      'getAllThumbnails', // Too large to proxy.
       'drmInfo',  // Too large to proxy
       'getManifest', // Too large to proxy
       'getManifestParserFactory',  // Would not serialize.
       'setVideoContainer',
+      'getActiveSessionsMetadata',
+      'releaseAllMutexes', // Very specific to the inner workings of the player.
+      'unloadAndSavePreload',
+      'preload',
 
       // Test helper methods (not @export'd)
       'createDrmEngine',
@@ -29,11 +37,13 @@ describe('CastUtils', () => {
       'createPlayhead',
       'createMediaSourceEngine',
       'createStreamingEngine',
+      'disableStream',
     ];
 
     const castMembers = CastUtils.PlayerVoidMethods
         .concat(CastUtils.PlayerPromiseMethods)
         .concat(Object.keys(CastUtils.PlayerGetterMethods))
+        .concat(Object.keys(CastUtils.LargePlayerGetterMethods))
         .concat(Object.keys(CastUtils.PlayerGetterMethodsThatRequireLive));
     // eslint-disable-next-line no-restricted-syntax
     const allPlayerMembers = Object.getOwnPropertyNames(shaka.Player.prototype);
@@ -170,7 +180,10 @@ describe('CastUtils', () => {
       }
     });
 
-    describe('TimeRanges', () => {
+    // Disable because these tests are flakey on ChromeLinux, and this whole
+    // module will be removed in
+    // https://github.com/shaka-project/shaka-player/issues/4214
+    xdescribe('TimeRanges', () => {
       /** @type {!HTMLVideoElement} */
       let video;
       /** @type {!shaka.util.EventManager} */
@@ -205,8 +218,10 @@ describe('CastUtils', () => {
 
         mediaSourceEngine = new shaka.media.MediaSourceEngine(
             video,
-            new shaka.test.FakeClosedCaptionParser(),
             new shaka.test.FakeTextDisplayer());
+        const config =
+            shaka.util.PlayerConfiguration.createDefault().mediaSource;
+        mediaSourceEngine.configure(config);
 
         const ContentType = shaka.util.ManifestParserUtils.ContentType;
         const initObject = new Map();
@@ -215,11 +230,11 @@ describe('CastUtils', () => {
         await mediaSourceEngine.init(initObject, false);
         const data = await shaka.test.Util.fetch(initSegmentUrl);
         await mediaSourceEngine.appendBuffer(
-            ContentType.VIDEO, data, null, null,
+            ContentType.VIDEO, data, null, fakeStream,
             /* hasClosedCaptions= */ false);
         const data2 = await shaka.test.Util.fetch(videoSegmentUrl);
         await mediaSourceEngine.appendBuffer(
-            ContentType.VIDEO, data2, null, null,
+            ContentType.VIDEO, data2, null, fakeStream,
             /* hasClosedCaptions= */ false);
       });
 

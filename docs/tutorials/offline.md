@@ -79,14 +79,14 @@ the end of the tutorial.
 ```js
 // myapp.js
 
-function initApp() {
+async function initApp() {
   // Install built-in polyfills to patch browser incompatibilities.
   shaka.polyfill.installAll();
 
   // Check to see if the browser supports the basic APIs Shaka needs.
   if (shaka.Player.isBrowserSupported()) {
     // Everything looks good!
-    initPlayer();
+    await initPlayer();
   } else {
     // This browser does not have the minimum set of APIs we need.
     console.error('Browser not supported!');
@@ -99,10 +99,11 @@ function initApp() {
   window.addEventListener('offline', updateOnlineStatus);
 }
 
-function initPlayer() {
+async function initPlayer() {
   // Create a Player instance.
   const video = document.getElementById('video');
-  const player = new shaka.Player(video);
+  const player = new shaka.Player();
+  await player.attach(video);
 
   // Attach player and storage to the window to make it easy to access
   // in the JS console and so we can access it in other methods.
@@ -339,6 +340,9 @@ you want.
 At this point, the content is now stored offline and it's ready to be played.
 Next we will add functionality to play offline content.
 
+Note: If you call `storage.store` twice with the same manifestUri as input,
+you'll download the same manifestUri twice.
+
 ## Playing Offline Content
 
 Now that we have stored some content, we want to play it. To do this, resolve
@@ -437,14 +441,14 @@ That’s it! For your convenience, here is the completed code:
 ```js
 // myapp.js
 
-function initApp() {
+async function initApp() {
   // Install built-in polyfills to patch browser incompatibilities.
   shaka.polyfill.installAll();
 
   // Check to see if the browser supports the basic APIs Shaka needs.
   if (shaka.Player.isBrowserSupported()) {
     // Everything looks good!
-    initPlayer();
+    await initPlayer();
   } else {
     // This browser does not have the minimum set of APIs we need.
     console.error('Browser not supported!');
@@ -457,10 +461,11 @@ function initApp() {
   window.addEventListener('offline', updateOnlineStatus);
 }
 
-function initPlayer() {
+async function initPlayer() {
   // Create a Player instance.
   const video = document.getElementById('video');
-  const player = new shaka.Player(video);
+  const player = new shaka.Player();
+  await player.attach(video);
 
   // Attach player and storage to the window to make it easy to access
   // in the JS console and so we can access it in other methods.
@@ -537,7 +542,7 @@ function downloadContent(manifestUri, title) {
     'downloaded': Date()
   };
 
-  return window.storage.store(manifestUri, metadata);
+  return window.storage.store(manifestUri, metadata).promise;
 }
 
 /*

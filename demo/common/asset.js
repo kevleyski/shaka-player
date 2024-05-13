@@ -7,12 +7,9 @@
 
 /**
  * @fileoverview
- * @suppress {missingRequire}
  */
 
 goog.provide('ShakaDemoAssetInfo');
-
-goog.require('shakaDemo.MessageIds');
 
 
 /**
@@ -45,6 +42,10 @@ const ShakaDemoAssetInfo = class {
     this.disabled = false;
     /** @type {!Array.<!shakaAssets.ExtraText>} */
     this.extraText = [];
+    /** @type {!Array.<string>} */
+    this.extraThumbnail = [];
+    /** @type {!Array.<!shakaAssets.ExtraChapter>} */
+    this.extraChapter = [];
     /** @type {?string} */
     this.certificateUri = null;
     /** @type {?string} */
@@ -67,6 +68,8 @@ const ShakaDemoAssetInfo = class {
     this.clearKeys = new Map(); // TODO: Setter method?
     /** @type {?Object} */
     this.extraConfig = null;
+    /** @type {?Object} */
+    this.extraUiConfig = null;
     /** @type {?string} */
     this.adTagUri = null;
     /** @type {?string} */
@@ -76,9 +79,20 @@ const ShakaDemoAssetInfo = class {
     /** @type {?string} */
     this.imaContentSrcId = null;
     /** @type {?string} */
-    this.mimeType = null;
+    this.imaManifestType = null;
     /** @type {?string} */
-    this.mediaPlaylistFullMimeType = null;
+    this.mediaTailorUrl = null;
+    /** @type {?Object} */
+    this.mediaTailorAdsParams = null;
+    /** @type {?string} */
+    this.mimeType = null;
+
+
+    // Preload values.
+    /** @type {?shaka.media.PreloadManager} */
+    this.preloadManager;
+    this.preloaded = false;
+    this.preloadFailed = false;
 
 
     // Offline storage values.
@@ -111,9 +125,9 @@ const ShakaDemoAssetInfo = class {
   }
 
   /**
-   * A sort comparator for comparing two message Ids, ignoring case.
-   * @param {shakaDemo.MessageIds} a
-   * @param {shakaDemo.MessageIds} b
+   * A sort comparator for comparing two messages, ignoring case.
+   * @param {string} a
+   * @param {string} b
    * @return {number}
    * @private
    */
@@ -163,13 +177,9 @@ const ShakaDemoAssetInfo = class {
     return this.drm.length == 1 && this.drm[0] == shakaAssets.KeySystem.CLEAR;
   }
 
-  /**
-   * @param {string} mediaPlaylistFullMimeType
-   * @return {!ShakaDemoAssetInfo}
-   */
-  setMediaPlaylistFullMimeType(mediaPlaylistFullMimeType) {
-    this.mediaPlaylistFullMimeType = mediaPlaylistFullMimeType;
-    return this;
+  /** @return {boolean} */
+  isAes128() {
+    return this.drm.length == 1 && this.drm[0] == shakaAssets.KeySystem.AES128;
   }
 
   /**
@@ -178,6 +188,15 @@ const ShakaDemoAssetInfo = class {
    */
   setExtraConfig(extraConfig) {
     this.extraConfig = extraConfig;
+    return this;
+  }
+
+  /**
+   * @param {!Object} extraUiConfig
+   * @return {!ShakaDemoAssetInfo}
+   */
+  setExtraUiConfig(extraUiConfig) {
+    this.extraUiConfig = extraUiConfig;
     return this;
   }
 
@@ -268,6 +287,34 @@ const ShakaDemoAssetInfo = class {
   }
 
   /**
+   * @param {string} type
+   * @return {!ShakaDemoAssetInfo}
+   */
+  setIMAManifestType(type) {
+    this.imaManifestType = type;
+    if (!this.features.includes(shakaAssets.Feature.ADS)) {
+      this.addFeature(shakaAssets.Feature.ADS);
+    }
+
+    return this;
+  }
+
+  /**
+   * @param {string} url
+   * @param {?Object=} adsParams
+   * @return {!ShakaDemoAssetInfo}
+   */
+  setMediaTailor(url, adsParams=null) {
+    this.mediaTailorUrl = url;
+    this.mediaTailorAdsParams = adsParams;
+    if (!this.features.includes(shakaAssets.Feature.ADS)) {
+      this.addFeature(shakaAssets.Feature.ADS);
+    }
+
+    return this;
+  }
+
+  /**
    * @param {string} headerName
    * @param {string} headerValue
    * @return {!ShakaDemoAssetInfo}
@@ -282,8 +329,47 @@ const ShakaDemoAssetInfo = class {
    * @return {!ShakaDemoAssetInfo}
    */
   addExtraText(extraText) {
-    // TODO: At no point do we actually use the extraText... why does it exist?
     this.extraText.push(extraText);
+    return this;
+  }
+
+  /**
+   * @param {string} textUri
+   * @return {!ShakaDemoAssetInfo}
+   */
+  removeExtraText(textUri) {
+    this.extraText = this.extraText.filter((extraText) => {
+      return extraText.uri != textUri;
+    });
+    return this;
+  }
+
+  /**
+   * @param {string} uri
+   * @return {!ShakaDemoAssetInfo}
+   */
+  addExtraThumbnail(uri) {
+    this.extraThumbnail.push(uri);
+    return this;
+  }
+
+  /**
+   * @param {shakaAssets.ExtraChapter} extraChapter
+   * @return {!ShakaDemoAssetInfo}
+   */
+  addExtraChapter(extraChapter) {
+    this.extraChapter.push(extraChapter);
+    return this;
+  }
+
+  /**
+   * @param {string} chapterUri
+   * @return {!ShakaDemoAssetInfo}
+   */
+  removeExtraChapter(chapterUri) {
+    this.extraChapter = this.extraChapter.filter((extraChapter) => {
+      return extraChapter.uri != chapterUri;
+    });
     return this;
   }
 
@@ -331,6 +417,11 @@ const ShakaDemoAssetInfo = class {
     // proper formatting.
     const raw = {};
     for (const key in this) {
+      if (key.startsWith('preload') || key.startsWith('store') ||
+          key.endsWith('Callback')) {
+        // These values shouldn't be saved, as they are dynamic.
+        continue;
+      }
       const value = this[key];
       if (value instanceof Map) {
         // The built-in JSON functions cannot convert Maps; this converts Maps
@@ -357,7 +448,8 @@ const ShakaDemoAssetInfo = class {
     networkingEngine.clearAllResponseFilters();
 
     if (this.licenseRequestHeaders.size) {
-      const filter = (requestType, request) => {
+      /** @type {!shaka.extern.RequestFilter} */
+      const filter = (requestType, request, context) => {
         return this.addLicenseRequestHeaders_(this.licenseRequestHeaders,
             requestType,
             request);
@@ -385,11 +477,6 @@ const ShakaDemoAssetInfo = class {
       for (const key in this.extraConfig) {
         config[key] = this.extraConfig[key];
       }
-    }
-
-    if (this.mediaPlaylistFullMimeType) {
-      config.manifest.hls.mediaPlaylistFullMimeType =
-          this.mediaPlaylistFullMimeType;
     }
 
     if (this.licenseServers.size) {

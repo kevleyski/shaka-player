@@ -41,8 +41,9 @@ describe('Mp4TtmlParser', () => {
   it('handles media segments with multiple mdats', () => {
     const parser = new shaka.text.Mp4TtmlParser();
     parser.parseInit(ttmlInitSegment);
-    const time = {periodStart: 0, segmentStart: 0, segmentEnd: 0, vttOffset: 0};
-    const ret = parser.parseMedia(ttmlSegmentMultipleMDAT, time);
+    const time =
+        {periodStart: 0, segmentStart: 0, segmentEnd: 60, vttOffset: 0};
+    const ret = parser.parseMedia(ttmlSegmentMultipleMDAT, time, null);
     // Bodies.
     expect(ret.length).toBe(2);
     // Divs.
@@ -55,17 +56,17 @@ describe('Mp4TtmlParser', () => {
 
   it('accounts for offset', () => {
     const time1 =
-        {periodStart: 0, segmentStart: 0, segmentEnd: 0, vttOffset: 0};
+        {periodStart: 0, segmentStart: 0, segmentEnd: 70, vttOffset: 0};
     const time2 =
-        {periodStart: 7, segmentStart: 0, segmentEnd: 0, vttOffset: 7};
+        {periodStart: 7, segmentStart: 0, segmentEnd: 70, vttOffset: 7};
 
     const parser = new shaka.text.Mp4TtmlParser();
     parser.parseInit(ttmlInitSegment);
 
-    const ret1 = parser.parseMedia(ttmlSegment, time1);
+    const ret1 = parser.parseMedia(ttmlSegment, time1, null);
     expect(ret1.length).toBeGreaterThan(0);
 
-    const ret2 = parser.parseMedia(ttmlSegment, time2);
+    const ret2 = parser.parseMedia(ttmlSegment, time2, null);
     expect(ret2.length).toBeGreaterThan(0);
 
     expect(ret2[0].startTime).toBe(ret1[0].startTime + 7);
@@ -161,8 +162,9 @@ describe('Mp4TtmlParser', () => {
     ];
     const parser = new shaka.text.Mp4TtmlParser();
     parser.parseInit(ttmlInitSegment);
-    const time = {periodStart: 0, segmentStart: 0, segmentEnd: 0, vttOffset: 0};
-    const result = parser.parseMedia(ttmlSegment, time);
+    const time =
+        {periodStart: 0, segmentStart: 0, segmentEnd: 60, vttOffset: 0};
+    const result = parser.parseMedia(ttmlSegment, time, null);
     shaka.test.TtmlUtils.verifyHelper(
         cues, result, {startTime: 23, endTime: 53.5});
   });

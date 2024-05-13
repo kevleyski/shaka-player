@@ -109,24 +109,36 @@ shaka.test.Waiter = class {
    * @return {!Promise}
    */
   waitUntilPlayheadReaches(mediaElement, timeGoal) {
+    this.improveTestSpeed_(mediaElement);
+
     // The name of what we're waiting for
     const goalName = 'movement from ' + mediaElement.currentTime +
                      ' to ' + timeGoal;
 
+    // The cleanup on timeout
+    let timer = null;
+    const cleanup = () => {
+      if (timer) {
+        timer.stop();
+      }
+      this.eventManager_.unlisten(mediaElement, 'timeupdate');
+      this.eventManager_.unlisten(mediaElement, 'ended');
+    };
+
     // The conditions for success
     const p = new Promise((resolve) => {
-      this.eventManager_.listen(mediaElement, 'timeupdate', () => {
+      const check = () => {
         if (mediaElement.currentTime >= timeGoal || mediaElement.ended) {
-          this.eventManager_.unlisten(mediaElement, 'timeupdate');
+          cleanup();
           resolve();
         }
-      });
-    });
+      };
 
-    // The cleanup on timeout
-    const cleanup = () => {
-      this.eventManager_.unlisten(mediaElement, 'timeupdate');
-    };
+      timer = new shaka.util.Timer(check);
+      timer.tickEvery(/* seconds= */ 1);
+      this.eventManager_.listen(mediaElement, 'timeupdate', check);
+      this.eventManager_.listen(mediaElement, 'ended', check);
+    });
 
     return this.waitUntilGeneric_(goalName, p, cleanup, mediaElement);
   }
@@ -153,6 +165,8 @@ shaka.test.Waiter = class {
    * @return {!Promise}
    */
   waitForEnd(mediaElement) {
+    this.improveTestSpeed_(mediaElement);
+
     // The name of what we're waiting for.
     const goalName = 'end of media';
 
@@ -180,6 +194,7 @@ shaka.test.Waiter = class {
       }
       this.eventManager_.unlisten(mediaElement, 'timeupdate');
       this.eventManager_.unlisten(mediaElement, 'ended');
+      this.eventManager_.unlisten(mediaElement, 'durationchange');
     };
 
     const p = new Promise((resolve) => {
@@ -198,6 +213,10 @@ shaka.test.Waiter = class {
       timer.tickEvery(/* seconds= */ 1);
       this.eventManager_.listen(mediaElement, 'timeupdate', check);
       this.eventManager_.listen(mediaElement, 'ended', check);
+      // Some tests on Safari expose a condition where the ended flag can be
+      // found in the desired state in a brief window during a durationchange
+      // event.
+      this.eventManager_.listen(mediaElement, 'durationchange', check);
     });
 
     return this.waitUntilGeneric_(goalName, p, cleanup, mediaElement);
@@ -207,13 +226,64 @@ shaka.test.Waiter = class {
    * Wait for the video to end or for |timeout| seconds to pass, whichever
    * occurs first.  The Promise is resolved when either of these happens.
    *
-   * @param {!HTMLMediaElement} target
+   * @param {!HTMLMediaElement} mediaElement
    * @param {number} timeout in seconds, after which the Promise succeeds
    * @return {!Promise}
    */
-  waitForEndOrTimeout(target, timeout) {
+  waitForEndOrTimeout(mediaElement, timeout) {
     this.failOnTimeout(false).timeoutAfter(timeout);
-    return this.waitForEnd(target);
+    return this.waitForEnd(mediaElement);
+  }
+
+  /**
+   * Wait until a certain amount of content is buffered.
+   *
+   * @param {!HTMLMediaElement} mediaElement
+   * @param {number} bufferingGoal in seconds, after which the Promise succeeds
+   * @return {!Promise}
+   */
+  waitUntilBuffered(mediaElement, bufferingGoal) {
+    // The name of what we're waiting for.
+    const goalName = `${bufferingGoal} seconds buffered`;
+
+    // The conditions for success.
+    const bufferedEnough = () => {
+      const end = shaka.media.TimeRangesUtils.bufferEnd(mediaElement.buffered);
+      if (end == null) {
+        return false;
+      }
+      return end - mediaElement.currentTime >= bufferingGoal;
+    };
+
+    if (bufferedEnough()) {
+      return Promise.resolve();
+    }
+
+    // Cleanup on timeout.
+    let timer = null;
+    const cleanup = () => {
+      if (timer) {
+        timer.stop();
+      }
+      this.eventManager_.unlisten(mediaElement, 'timeupdate');
+      this.eventManager_.unlisten(mediaElement, 'ended');
+    };
+
+    const p = new Promise((resolve) => {
+      const check = () => {
+        if (bufferedEnough()) {
+          cleanup();
+          resolve();
+        }
+      };
+
+      timer = new shaka.util.Timer(check);
+      timer.tickEvery(/* seconds= */ 1);
+      this.eventManager_.listen(mediaElement, 'timeupdate', check);
+      this.eventManager_.listen(mediaElement, 'ended', check);
+    });
+
+    return this.waitUntilGeneric_(goalName, p, cleanup, mediaElement);
   }
 
   /**
@@ -332,5 +402,20 @@ shaka.test.Waiter = class {
         `ended: ${mediaElement.ended}\n` +
         `buffered: ${JSON.stringify(buffered)}\n`;
     shaka.log.error(error.message);
+  }
+
+  /**
+   * @param {!HTMLMediaElement} mediaElement
+   * @private
+   */
+  improveTestSpeed_(mediaElement) {
+    // Work around bizarre playback slowdowns that only seem to occur with
+    // WebDriver and only on Mac.  Increasing the playback rate allows tests
+    // to complete without timing out.
+    // We also use it on all platforms (except Tizen) because it reduces the
+    // time it takes for tests to run.
+    if (mediaElement.playbackRate == 1 && !shaka.util.Platform.isTizen()) {
+      mediaElement.playbackRate = 2;
+    }
   }
 };

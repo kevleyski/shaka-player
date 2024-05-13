@@ -17,12 +17,16 @@
 import argparse
 import io
 import json
+import os
 import re
 import subprocess
 import zipfile
 
 # TODO(joeyparrish): Figure out how to get karma to output relative paths only.
 def StripGitDir(path):
+  # Convert Windows-style paths to Unix-style paths so we can read coverage
+  # data from Windows runners, too.
+  path = path.replace('\\', '/')
   # Strip the path to the git clone, leaving only the source path within the
   # repo.
   return re.sub(r'.*?/(lib|ui)/', r'\1/', path)
@@ -221,6 +225,16 @@ def IncrementalCoverage(pr, coverage_details):
     return None
   return num_covered / num_changed
 
+def set_output(name, value):
+  path = os.environ.get("GITHUB_OUTPUT")
+  if path:
+    # Inside GitHub Actions, output the data to a special file GitHub provides.
+    with open(path, "a") as f:
+      f.write("{}={}\n".format(name, value))
+  else:
+    # Outside of GitHub Actions, just print the data.
+    print("OUTPUT {}={}".format(name, value))
+
 def main():
   parser = argparse.ArgumentParser(
       description="Compute incremental code coverage for a PR",
@@ -241,11 +255,11 @@ def main():
   pr = PullRequest(args.repo, pr_number)
   coverage = IncrementalCoverage(pr, coverage_details)
 
-  print("::set-output name=pr_number::%d" % pr_number)
+  set_output("pr_number", str(pr_number))
   if coverage is None:
-    print("::set-output name=coverage::No instrumented code was changed.")
+    set_output("coverage", "No instrumented code was changed.")
   else:
-    print("::set-output name=coverage::%.2f%%" % (coverage * 100.0))
+    set_output("coverage", "%.2f%%" % (coverage * 100.0))
 
 if __name__ == "__main__":
   main()

@@ -10,7 +10,6 @@ goog.provide('shakaDemo.Main');
 goog.require('ShakaDemoAssetInfo');
 goog.require('goog.asserts');
 goog.require('shakaDemo.CloseButton');
-goog.require('shakaDemo.MessageIds');
 goog.require('shakaDemo.Utils');
 goog.require('shakaDemo.Visualizer');
 goog.require('shakaDemo.VisualizerButton');
@@ -122,9 +121,8 @@ shakaDemo.Main = class {
    * This does not dispatch the shaka-main-loaded event, so it will not cause
    * the nav bar buttons to be set up.
    * @param {!shaka.ui.Overlay.FailReasonCode} reasonCode
-   * @return {!Promise}
    */
-  async initFailed(reasonCode) {
+  initFailed(reasonCode) {
     this.initCommon_();
 
     // Set up version links, so the user can switch to compiled mode if
@@ -155,25 +153,19 @@ shakaDemo.Main = class {
       element.classList.add('disabled-by-fail');
     }
 
-    // Because the UI did not load, this will need to set up a localization
-    // object manually.
-    this.localization_ = new shaka.ui.Localization(/* fallbackLocale= */ 'en');
-    this.localization_.changeLocale(navigator.languages || []);
-    await this.setupLocalization_();
-
     // Process a synthetic error about lack of browser support.
     const severity = shaka.util.Error.Severity.CRITICAL;
     let href = '';
     let message = '';
     switch (reasonCode) {
       case shaka.ui.Overlay.FailReasonCode.NO_BROWSER_SUPPORT:
-        message = this.getLocalizedString(
-            shakaDemo.MessageIds.FAILURE_NO_BROWSER_SUPPORT);
+        message = 'Your browser is not supported!';
         href = 'https://github.com/shaka-project/shaka-player#' +
                 'platform-and-browser-support-matrix';
         break;
       case shaka.ui.Overlay.FailReasonCode.PLAYER_FAILED_TO_LOAD:
-        message = this.getLocalizedString(shakaDemo.MessageIds.FAILURE_MISC);
+        message = 'Shaka Player failed to load! If you are using an adblocker' +
+            ', try switching to compiled mode at the bottom of the page.';
         break;
     }
     this.handleError_(severity, message, href);
@@ -205,7 +197,7 @@ shakaDemo.Main = class {
     // Optionally enter noinput mode. This has to happen before setting up the
     // player.
     this.noInput_ = 'noinput' in this.getParams_();
-    await this.setupPlayer_();
+    this.setupPlayer_();
     this.readHash_();
     window.addEventListener('hashchange', () => this.hashChanged_());
 
@@ -296,7 +288,32 @@ shakaDemo.Main = class {
       text = text.replace(replaceString, value);
     };
     fillInTemplate('RE:player', shaka.Player.version);
-    fillInTemplate('RE:link', window.location.href);
+    if (this.selectedAsset) {
+      const uriLines = [];
+      const addLine = (key, value) => {
+        uriLines.push(key + '= `' + value + '`');
+      };
+      addLine('uri', this.selectedAsset.manifestUri);
+      if (this.selectedAsset.adTagUri) {
+        addLine('ad tag uri', this.selectedAsset.adTagUri);
+      }
+      if (this.selectedAsset.licenseServers.size) {
+        const uri = this.selectedAsset.licenseServers.values().next().value;
+        addLine('license server', uri);
+        for (const drmSystem of this.selectedAsset.licenseServers.keys()) {
+          if (!shakaDemo.Main.commonDrmSystems.includes(drmSystem)) {
+            addLine('drm system', drmSystem);
+            break;
+          }
+        }
+      }
+      if (this.selectedAsset.certificateUri) {
+        addLine('certificate', this.selectedAsset.certificateUri);
+      }
+      fillInTemplate('RE:uris', uriLines.join('\n'));
+    } else {
+      fillInTemplate('RE:uris', 'No asset');
+    }
     fillInTemplate('RE:browser', navigator.userAgent);
     if (this.selectedAsset &&
         this.selectedAsset.source == shakaAssets.Source.CUSTOM) {
@@ -308,11 +325,14 @@ shakaDemo.Main = class {
       fillInTemplate('RE:customwarning\n', '');
     }
 
+    const urlTerms = [];
+    urlTerms.push('labels=type%3A+bug');
+    urlTerms.push('body=' + encodeURIComponent(text));
+    const url = 'https://github.com/shaka-project/shaka-player/issues/new?' +
+        urlTerms.join('&');
+
     // Navigate to the github issue opening interface, with the
-    // partially-filled template as a preset body.
-    let url = 'https://github.com/shaka-project/shaka-player/issues/new?';
-    url += 'body=' + encodeURIComponent(text);
-    // Open in another tab.
+    // partially-filled template as a preset body, opening in another tab.
     window.open(url, '_blank');
   }
 
@@ -364,14 +384,26 @@ shakaDemo.Main = class {
     ui.configure(uiConfig);
   }
 
-  /**
-   * @return {!Promise}
-   * @private
-   */
-  async setupPlayer_() {
+  /** @private */
+  setupPlayer_() {
     const video = /** @type {!HTMLVideoElement} */ (this.video_);
     const ui = video['ui'];
     this.player_ = ui.getControls().getPlayer();
+
+    // Change the poster by the APIC ID3 if the stream is audio only.
+    this.player_.addEventListener('metadata', (event) => {
+      if (!this.player_.isAudioOnly()) {
+        return;
+      }
+      const payload = event['payload'];
+      if (payload &&
+          payload['key'] == 'APIC' && payload['mimeType'] == '-->') {
+        const url = payload['data'];
+        if (url && url != video.poster) {
+          video.poster = url;
+        }
+      }
+    });
 
     if (!this.noInput_) {
       // Don't add the close button if in noInput mode; it doesn't make much
@@ -415,7 +447,6 @@ shakaDemo.Main = class {
     });
 
     this.localization_ = this.controls_.getLocalization();
-    await this.setupLocalization_();
 
     const drawerCloseButton = document.getElementById('drawer-close-button');
     drawerCloseButton.addEventListener('click', () => {
@@ -451,50 +482,6 @@ shakaDemo.Main = class {
       this.hideElement_(drawerCloseButton);
     });
     this.hideElement_(drawerCloseButton);
-  }
-
-  /**
-   * @return {!Promise}
-   * @private
-   */
-  async setupLocalization_() {
-    // Set up localization lazy-loading.
-    const applyNewLocaleIfPossible = () => {
-      this.localizeHTMLElements_();
-      this.dispatchEventWithName_('shaka-main-locale-changed');
-    };
-    const UNKNOWN_LOCALES = shaka.ui.Localization.UNKNOWN_LOCALES;
-    this.localization_.addEventListener(UNKNOWN_LOCALES, (event) => {
-      for (const locale of event['locales']) {
-        // This will leave promise rejections uncaught; this is acceptable, as
-        // this function is actually expected to fail fairly often, and has
-        // built-in fallback behavior (from localization events) without needing
-        // to catch the promise rejection.
-        this.loadUILocale_(locale).then(() => {
-          if (locale == this.uiLocale_) {
-            applyNewLocaleIfPossible();
-          }
-        });
-      }
-    });
-    const LOCALE_CHANGED = shaka.ui.Localization.LOCALE_CHANGED;
-    this.localization_.addEventListener(LOCALE_CHANGED, (event) => {
-      applyNewLocaleIfPossible();
-    });
-    const initialLocaleLoads = [];
-    initialLocaleLoads.push(this.loadUILocale_(this.uiLocale_));
-    if (this.uiLocale_.includes('-')) {
-      // Also try to load the 'base' localization.
-      // This is so that, for example, the uiLocale_ is set to 'en-US', it will
-      // try to load 'en'.
-      initialLocaleLoads.push(this.loadUILocale_(this.uiLocale_.split('-')[0]));
-    }
-    if (!this.uiLocale_.startsWith('en')) {
-      // Load 'en' as a fallback option, if not already loaded.
-      initialLocaleLoads.push(this.loadUILocale_('en'));
-    }
-    await Promise.all(initialLocaleLoads);
-    this.localizeHTMLElements_();
   }
 
   /** @return {boolean} */
@@ -691,13 +678,13 @@ shakaDemo.Main = class {
    *
    * @param {!ShakaDemoAssetInfo} asset
    * @param {boolean} needOffline True if offline support is required.
-   * @return {?shakaDemo.MessageIds} unsupportedReason
+   * @return {?string} unsupportedReason
    *   Null if asset is supported.
    */
   getAssetUnsupportedReason(asset, needOffline) {
     if (needOffline &&
         (!shaka.offline.Storage.support() || !this.initialStoredList_)) {
-      return shakaDemo.MessageIds.UNSUPPORTED_NO_OFFLINE;
+      return 'Your browser does not support offline storage.';
     }
 
     if (asset.source == shakaAssets.Source.CUSTOM) {
@@ -708,19 +695,19 @@ shakaDemo.Main = class {
 
     // Is the asset disabled?
     if (asset.disabled) {
-      return shakaDemo.MessageIds.UNSUPPORTED_DISABLED;
+      return 'This asset is disabled.';
     }
 
     if (needOffline && !asset.features.includes(shakaAssets.Feature.OFFLINE)) {
-      return shakaDemo.MessageIds.UNSUPPORTED_NO_DOWNLOAD;
+      return 'This asset cannot be downloaded.';
     }
 
-    if (!asset.isClear()) {
+    if (!asset.isClear() && !asset.isAes128()) {
       const hasSupportedDRM = asset.drm.some((drm) => {
         return this.support_.drm[shakaAssets.identifierForKeySystem(drm)];
       });
       if (!hasSupportedDRM) {
-        return shakaDemo.MessageIds.UNSUPPORTED_NO_KEY_SUPPORT;
+        return 'Your browser does not support the required key systems.';
       }
       if (needOffline) {
         const hasSupportedOfflineDRM = asset.drm.some((drm) => {
@@ -729,19 +716,24 @@ shakaDemo.Main = class {
                  this.support_.drm[identifier].persistentState;
         });
         if (!hasSupportedOfflineDRM) {
-          return shakaDemo.MessageIds.UNSUPPORTED_NO_LICENSE_SUPPORT;
+          return 'Your browser does not support offline licenses for the ' +
+              'required key systems.';
         }
       }
     }
 
     // Does the browser support the asset's manifest type?
     if (asset.features.includes(shakaAssets.Feature.DASH) &&
-        !this.support_.manifest['mpd']) {
-      return shakaDemo.MessageIds.UNSUPPORTED_NO_DASH_SUPPORT;
+        !this.support_.manifest['application/dash+xml']) {
+      return 'Your browser does not support MPEG-DASH manifests.';
     }
     if (asset.features.includes(shakaAssets.Feature.HLS) &&
-        !this.support_.manifest['m3u8']) {
-      return shakaDemo.MessageIds.UNSUPPORTED_NO_HLS_SUPPORT;
+        !this.support_.manifest['application/x-mpegurl']) {
+      return 'Your browser does not support HLS manifests.';
+    }
+    if (asset.features.includes(shakaAssets.Feature.MSS) &&
+        !this.support_.manifest['application/vnd.ms-sstr+xml']) {
+      return 'Your browser does not support MSS manifests.';
     }
 
     // Does the asset contain a playable mime type?
@@ -758,11 +750,24 @@ shakaDemo.Main = class {
     if (asset.features.includes(shakaAssets.Feature.CONTAINERLESS)) {
       mimeTypes.push('audio/aac');
     }
-    const hasSupportedMimeType = mimeTypes.some((type) => {
+    if (asset.features.includes(shakaAssets.Feature.DOLBY_VISION_3D)) {
+      mimeTypes.push('video/mp4; codecs="dvh1.20.01"');
+    }
+    let hasSupportedMimeType = mimeTypes.some((type) => {
       return this.support_.media[type];
     });
+    if (!hasSupportedMimeType &&
+        !(window.ManagedMediaSource || window.MediaSource) &&
+        !!navigator.vendor && navigator.vendor.includes('Apple')) {
+      if (mimeTypes.includes('video/mp4')) {
+        hasSupportedMimeType = true;
+      }
+      if (mimeTypes.includes('video/mp2t')) {
+        hasSupportedMimeType = true;
+      }
+    }
     if (!hasSupportedMimeType) {
-      return shakaDemo.MessageIds.UNSUPPORTED_NO_FORMAT_SUPPORT;
+      return 'Your browser does not support the required video format.';
     }
 
     return null;
@@ -807,55 +812,6 @@ shakaDemo.Main = class {
    */
   getNativeControlsEnabled() {
     return this.nativeControlsEnabled_;
-  }
-
-  /**
-   * Look through all elements in the DOM, and look for things tagged as having
-   * a localized string. Then, localize them.
-   *
-   * @private
-   */
-  localizeHTMLElements_() {
-    for (const element of document.querySelectorAll('[localized-string]')) {
-      const key = element.getAttribute('localized-string');
-      const value = shakaDemo.MessageIds[key];
-      if (value) {
-        element.textContent = this.getLocalizedString(value);
-      }
-    }
-  }
-
-  /**
-   * @param {!shakaDemo.MessageIds} string
-   * @return {string}
-   */
-  getLocalizedString(string) {
-    return this.localization_.resolve(string);
-  }
-
-  /**
-   * @param {string} locale
-   * @return {!Promise}
-   * @private
-   */
-  async loadUILocale_(locale) {
-    if (!locale) {
-      return;
-    }
-
-    const load = async (urlBase) => {
-      const url = urlBase + '/locales/' + locale + '.json';
-
-      try {
-        const text = await this.loadText_(url);
-        const obj = /** @type {!Object.<string, string>} */(JSON.parse(text));
-        const map = new Map(Object.entries(obj));
-        this.localization_.insert(locale, map);
-      } catch (error) {
-        console.warn('Unable to load locale', locale, 'for url', url);
-      }
-    };
-    await Promise.all([load('../ui'), load('../demo')]);
   }
 
   /** @param {string} locale */
@@ -1185,6 +1141,10 @@ shakaDemo.Main = class {
     if (document.pictureInPictureElement) {
       document.exitPictureInPicture();
     }
+    if (window.documentPictureInPicture &&
+        window.documentPictureInPicture.window) {
+      window.documentPictureInPicture.window.close();
+    }
     this.player_.unload();
 
     // The currently-selected asset changed, so update asset cards.
@@ -1219,9 +1179,8 @@ shakaDemo.Main = class {
       // Remove all not-player-applied configurations, by resetting the
       // configuration then re-applying the desired configuration.
       this.player_.resetConfiguration();
-      this.player_.configure(this.desiredConfig_);
+      this.readHash_();
       this.player_.configure(assetConfig);
-      // This uses Player.configure so as to not change |this.desiredConfig_|.
     }
 
     const config = storage ?
@@ -1277,6 +1236,40 @@ shakaDemo.Main = class {
   /**
    * @param {ShakaDemoAssetInfo} asset
    */
+  async preloadAsset(asset) {
+    await this.drmConfiguration_(asset);
+    const manifestUri = await this.getManifestUri_(asset);
+    asset.preloadManager = await this.player_.preload(manifestUri);
+  }
+
+  /**
+   * @param {ShakaDemoAssetInfo} asset
+   * @return {!Promise.<string>}
+   * @private
+   */
+  async getManifestUri_(asset) {
+    let manifestUri = asset.manifestUri;
+    // If we have an offline copy, use that.  If the offlineUri field is null,
+    // we are still downloading it.
+    if (asset.storedContent && asset.storedContent.offlineUri) {
+      manifestUri = asset.storedContent.offlineUri;
+    }
+    // If it's a server side dai asset, request ad-containing manifest
+    // from the ad manager.
+    if (asset.imaAssetKey || (asset.imaContentSrcId && asset.imaVideoId)) {
+      manifestUri = await this.getManifestUriFromAdManager_(asset);
+    }
+    // If it's a MediaTailor asset, request ad-containing manifest
+    // from the ad manager.
+    if (asset.mediaTailorUrl) {
+      manifestUri = await this.getManifestUriFromMediaTailorAdManager_(asset);
+    }
+    return manifestUri;
+  }
+
+  /**
+   * @param {ShakaDemoAssetInfo} asset
+   */
   async loadAsset(asset) {
     try {
       this.selectedAsset = asset;
@@ -1301,26 +1294,56 @@ shakaDemo.Main = class {
 
       await this.drmConfiguration_(asset);
       this.controls_.getCastProxy().setAppData({'asset': asset});
+      const ui = this.video_['ui'];
+      if (asset.extraUiConfig) {
+        ui.configure(asset.extraUiConfig);
+      } else {
+        const uiConfig = {
+          displayInVrMode: false,
+        };
+        ui.configure(uiConfig);
+      }
 
       // Finally, the asset can be loaded.
-      let manifestUri = asset.manifestUri;
-      // If we have an offline copy, use that.  If the offlineUri field is null,
-      // we are still downloading it.
-      if (asset.storedContent && asset.storedContent.offlineUri) {
-        manifestUri = asset.storedContent.offlineUri;
+      if (asset.preloadManager) {
+        const preloadManager = asset.preloadManager;
+        asset.preloadManager = null;
+        await this.player_.load(preloadManager);
+      } else {
+        const manifestUri = await this.getManifestUri_(asset);
+        await this.player_.load(
+            manifestUri,
+            /* startTime= */ null,
+            asset.mimeType || undefined);
       }
-      // If it's a server side dai asset, request ad-containing manifest
-      // from the ad manager.
-      if (asset.imaAssetKey || (asset.imaContentSrcId && asset.imaVideoId)) {
-        manifestUri = await this.getManifestUriFromAdManager_(asset);
-      }
-      await this.player_.load(
-          manifestUri,
-          /* startTime= */ null,
-          asset.mimeType || undefined);
 
-      if (this.player_.isAudioOnly()) {
+      if (this.player_.isAudioOnly() &&
+          this.video_.poster == shakaDemo.Main.mainPoster_) {
         this.video_.poster = shakaDemo.Main.audioOnlyPoster_;
+      }
+
+      for (const extraText of asset.extraText) {
+        if (extraText.mime) {
+          this.player_.addTextTrackAsync(extraText.uri, extraText.language,
+              extraText.kind, extraText.mime, extraText.codecs);
+        } else {
+          this.player_.addTextTrackAsync(extraText.uri, extraText.language,
+              extraText.kind);
+        }
+      }
+
+      for (const extraThumbnail of asset.extraThumbnail) {
+        this.player_.addThumbnailsTrack(extraThumbnail);
+      }
+
+      for (const extraChapter of asset.extraChapter) {
+        if (extraChapter.mime) {
+          this.player_.addChaptersTrack(
+              extraChapter.uri, extraChapter.language, extraChapter.mime);
+        } else {
+          this.player_.addChaptersTrack(
+              extraChapter.uri, extraChapter.language);
+        }
       }
 
       // If the asset has an ad tag attached to it, load the ads
@@ -1331,7 +1354,8 @@ shakaDemo.Main = class {
           // If that happens, just proceed to load.
           goog.asserts.assert(this.video_ != null, 'this.video should exist!');
           adManager.initClientSide(
-              this.controls_.getClientSideAdContainer(), this.video_);
+              this.controls_.getClientSideAdContainer(), this.video_,
+              /** adsRenderingSettings= **/ null);
           const adRequest = new google.ima.AdsRequest();
           adRequest.adTagUrl = asset.adTagUri;
           adManager.requestClientSideAds(adRequest);
@@ -1350,6 +1374,46 @@ shakaDemo.Main = class {
         };
         metadata.artist = asset.source;
         navigator.mediaSession.metadata = new MediaMetadata(metadata);
+
+        const addMediaSessionHandler = (type, callback) => {
+          try {
+            navigator.mediaSession.setActionHandler(type, (details) => {
+              callback(details);
+            });
+          } catch (error) {
+            console.warn(
+                `The "${type}" media session action is not supported.`);
+          }
+        };
+        const commonHandler = (details) => {
+          switch (details.action) {
+            case 'pause':
+              this.video_.pause();
+              break;
+            case 'play':
+              this.video_.play();
+              break;
+            case 'seekbackward':
+              this.video_.currentTime -= (details.seekOffset || 10);
+              break;
+            case 'seekforward':
+              this.video_.currentTime += (details.seekOffset || 10);
+              break;
+            case 'stop':
+              this.unload();
+              break;
+            case 'enterpictureinpicture':
+              this.controls_.togglePiP();
+              break;
+          }
+        };
+
+        addMediaSessionHandler('pause', commonHandler);
+        addMediaSessionHandler('play', commonHandler);
+        addMediaSessionHandler('seekbackward', commonHandler);
+        addMediaSessionHandler('seekforward', commonHandler);
+        addMediaSessionHandler('stop', commonHandler);
+        addMediaSessionHandler('enterpictureinpicture', commonHandler);
       }
 
       if (this.visualizer_ && this.visualizer_.active) {
@@ -1387,7 +1451,10 @@ shakaDemo.Main = class {
         // NaN != NaN, so there has to be a special check for it to prevent
         // false positives.
         const bothAreNaN = isNaN(currentValue) && isNaN(defaultValue);
-        if (currentValue != defaultValue && !bothAreNaN) {
+        // Strings count as NaN too, so check for them specifically.
+        const bothAreStrings = (typeof currentValue) == 'string' &&
+            (typeof defaultValue) == 'string';
+        if (currentValue != defaultValue && (!bothAreNaN || bothAreStrings)) {
           // Don't bother saving in the hash unless it's a non-default value.
           params.push(hashName + '=' + currentValue);
         }
@@ -1561,9 +1628,51 @@ shakaDemo.Main = class {
         request.contentSourceId = asset.imaContentSrcId;
         request.videoId = asset.imaVideoId;
       }
+      switch (asset.imaManifestType) {
+        case 'DASH':
+        case 'dash':
+        case 'MPD':
+        case 'mpd':
+          request.format = google.ima.dai.api.StreamRequest.StreamFormat.DASH;
+          break;
+        case 'HLS':
+        case 'hls':
+        case 'M3U8':
+        case 'm3u8':
+          request.format = google.ima.dai.api.StreamRequest.StreamFormat.HLS;
+          break;
+      }
 
       const uri = await adManager.requestServerSideStream(
           request, /* backupUri= */ asset.manifestUri);
+      return uri;
+    } catch (error) {
+      console.log(error);
+      console.warn('Ads code has been prevented from running ' +
+          'or returned an error. Proceeding without ads.');
+
+      return asset.manifestUri;
+    }
+  }
+
+  /**
+   * @param {ShakaDemoAssetInfo} asset
+   * @return {!Promise.<string>}
+   * @private
+   */
+  async getManifestUriFromMediaTailorAdManager_(asset) {
+    const adManager = this.player_.getAdManager();
+    const container = this.controls_.getServerSideAdContainer();
+    try {
+      goog.asserts.assert(this.video_ != null, 'Video should not be null!');
+      goog.asserts.assert(asset.mediaTailorUrl != null,
+          'Media Tailor info not be null!');
+      const netEngine = this.player_.getNetworkingEngine();
+      goog.asserts.assert(netEngine, 'There should be a net engine.');
+      adManager.initMediaTailor(container, netEngine, this.video_);
+      const uri = await adManager.requestMediaTailorStream(
+          asset.mediaTailorUrl, asset.mediaTailorAdsParams,
+          /* backupUri= */ asset.manifestUri);
       return uri;
     } catch (error) {
       console.log(error);
@@ -1748,7 +1857,6 @@ shakaDemo.Main = class {
     // Always show the new error if:
     //   1. there is no error showing currently
     //   2. the new error is more severe than the old one
-    // Sadly, we do not (yet?) have localizations for error messages.
     if (this.currentErrorSeverity_ == null ||
         severity > this.currentErrorSeverity_) {
       this.errorDisplayLink_.href = href;
@@ -1803,7 +1911,6 @@ shakaDemo.Main.commonDrmSystems = [
   'com.widevine.alpha',
   'com.microsoft.playready',
   'com.apple.fps',
-  'com.adobe.primetime',
   'org.w3.clearkey',
 ];
 

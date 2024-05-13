@@ -64,6 +64,15 @@ shaka.extern.IAdManager = class extends EventTarget {
    */
   setLocale(locale) {}
 
+  /**
+   * Called by the Player to provide an updated configuration any time it
+   * changes.
+   * Must be called at least once before init*().
+   *
+   * @param {shaka.extern.AdsConfiguration} config
+   */
+  configure(config) {}
+
   release() {}
 
   onAssetUnload() {}
@@ -71,13 +80,39 @@ shaka.extern.IAdManager = class extends EventTarget {
   /**
    * @param {!HTMLElement} adContainer
    * @param {!HTMLMediaElement} video
+   * @param {?google.ima.AdsRenderingSettings} adsRenderingSettings
    */
-  initClientSide(adContainer, video) {}
+  initClientSide(adContainer, video, adsRenderingSettings) {}
 
   /**
    * @param {!google.ima.AdsRequest} imaRequest
    */
   requestClientSideAds(imaRequest) {}
+
+  /**
+   * @param {!google.ima.AdsRenderingSettings} adsRenderingSettings
+   */
+  updateClientSideAdsRenderingSettings(adsRenderingSettings) {}
+
+  /**
+   * @param {!HTMLElement} adContainer
+   * @param {!shaka.net.NetworkingEngine} networkingEngine
+   * @param {!HTMLMediaElement} video
+   */
+  initMediaTailor(adContainer, networkingEngine, video) {}
+
+  /**
+   * @param {string} url
+   * @param {Object} adsParams
+   * @param {string=} backupUrl
+   * @return {!Promise.<string>}
+   */
+  requestMediaTailorStream(url, adsParams, backupUrl) {}
+
+  /**
+   * @param {string} url
+   */
+  addMediaTailorTrackingUrl(url) {}
 
   /**
    * @param {!HTMLElement} adContainer
@@ -103,6 +138,11 @@ shaka.extern.IAdManager = class extends EventTarget {
   getServerSideCuePoints() {}
 
   /**
+   * @return {!Array.<!shaka.extern.AdCuePoint>}
+   */
+  getCuePoints() {}
+
+  /**
    * Get statistics for the current playback session. If the player is not
    * playing content, this will return an empty stats object.
    */
@@ -114,13 +154,20 @@ shaka.extern.IAdManager = class extends EventTarget {
   onDashTimedMetadata(region) {}
 
   /**
+   * Fired when the manifest is updated.
+   *
+   * @param {boolean} isLive
+   */
+  onManifestUpdated(isLive) {}
+
+  /**
    * @param {shaka.extern.ID3Metadata} metadata
    * @param {number} timestampOffset
    */
   onHlsTimedMetadata(metadata, timestampOffset) {}
 
   /**
-   * @param {shaka.extern.ID3Metadata} value
+   * @param {shaka.extern.MetadataFrame} value
    */
   onCueMetadataChange(value) {}
 };
@@ -227,4 +274,59 @@ shaka.extern.IAd = class {
    * @return {number}
    */
   getPositionInSequence() {}
+
+  /**
+   * @return {string}
+   */
+  getTitle() {}
+
+  /**
+   * @return {string}
+   */
+  getDescription() {}
+
+  /**
+   * @return {number}
+   */
+  getVastMediaBitrate() {}
+
+  /**
+   * @return {number}
+   */
+  getVastMediaHeight() {}
+
+  /**
+   * @return {number}
+   */
+  getVastMediaWidth() {}
+
+  /**
+   * @return {string}
+   */
+  getAdId() {}
+
+  /**
+   * @return {string}
+   */
+  getCreativeAdId() {}
+
+  /**
+   * @return {string}
+   */
+  getAdvertiserName() {}
+
+  /**
+   * @return {?string}
+   */
+  getMediaUrl() {}
+
+  /**
+   * @return {number}
+   */
+  getTimeOffset() {}
+
+  /**
+   * @return {number}
+   */
+  getPodIndex() {}
 };

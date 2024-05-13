@@ -87,6 +87,7 @@ describe('ManifestConverter', () => {
         sessionIds: [1, 2, 3, 4],
         drmInfo: {
           keySystem: 'com.foo.bar',
+          encryptionScheme: 'foo',
           licenseServerUri: 'http://example.com/drm',
           distinctiveIdentifierRequired: true,
           persistentStateRequired: true,
@@ -298,11 +299,13 @@ describe('ManifestConverter', () => {
     const streamDB = {
       id,
       originalId: id.toString(),
+      groupId: null,
       primary: false,
       type,
       mimeType: '',
       codecs: '',
       language: '',
+      originalLanguage: null,
       label: null,
       width: null,
       height: null,
@@ -316,6 +319,8 @@ describe('ManifestConverter', () => {
       audioSamplingRate: null,
       spatialAudio: false,
       closedCaptions: null,
+      external: false,
+      fastSwitching: false,
     };
 
     return streamDB;
@@ -325,9 +330,11 @@ describe('ManifestConverter', () => {
    * @param {number} startTime
    * @param {number} endTime
    * @param {number} dataKey
+   * @param {string} mimeType
+   * @param {string} codecs
    * @return {shaka.extern.SegmentDB}
    */
-  function createSegmentDB(startTime, endTime, dataKey) {
+  function createSegmentDB(startTime, endTime, dataKey, mimeType, codecs) {
     /** @type {shaka.extern.SegmentDB} */
     const segment = {
       startTime,
@@ -338,6 +345,8 @@ describe('ManifestConverter', () => {
       appendWindowEnd: Infinity,
       timestampOffset: 0,
       tilesLayout: '',
+      mimeType,
+      codecs,
     };
 
     return segment;
@@ -350,18 +359,23 @@ describe('ManifestConverter', () => {
    */
   function createVideoStreamDB(id, variantIds) {
     const ContentType = shaka.util.ManifestParserUtils.ContentType;
+    const mimeType = 'video/mp4';
+    const codecs = 'avc1.42c01e';
     return {
       id,
       originalId: id.toString(),
+      groupId: null,
       primary: false,
       type: ContentType.VIDEO,
-      mimeType: 'video/mp4',
-      codecs: 'avc1.42c01e',
+      mimeType,
+      codecs,
       frameRate: 22,
       pixelAspectRatio: '59:54',
       hdr: undefined,
+      videoLayout: undefined,
       kind: undefined,
       language: '',
+      originalLanguage: null,
       label: null,
       width: 250,
       height: 100,
@@ -371,15 +385,18 @@ describe('ManifestConverter', () => {
         createSegmentDB(
             /* startTime= */ 0,
             /* endTime= */ 10,
-            /* dataKey= */ 1),
+            /* dataKey= */ 1,
+            mimeType, codecs),
         createSegmentDB(
             /* startTime= */ 10,
             /* endTime= */ 20,
-            /* dataKey= */ 2),
+            /* dataKey= */ 2,
+            mimeType, codecs),
         createSegmentDB(
             /* startTime= */ 20,
             /* endTime= */ 25,
-            /* dataKey= */ 3),
+            /* dataKey= */ 3,
+            mimeType, codecs),
       ],
       variantIds,
       roles: [],
@@ -389,6 +406,9 @@ describe('ManifestConverter', () => {
       spatialAudio: false,
       closedCaptions: null,
       tilesLayout: undefined,
+      accessibilityPurpose: null,
+      external: false,
+      fastSwitching: false,
     };
   }
 
@@ -399,18 +419,23 @@ describe('ManifestConverter', () => {
    */
   function createAudioStreamDB(id, variantIds) {
     const ContentType = shaka.util.ManifestParserUtils.ContentType;
+    const mimeType = 'audio/mp4';
+    const codecs = 'mp4a.40.2';
     return {
       id,
       originalId: id.toString(),
+      groupId: null,
       primary: false,
       type: ContentType.AUDIO,
-      mimeType: 'audio/mp4',
-      codecs: 'mp4a.40.2',
+      mimeType,
+      codecs,
       frameRate: undefined,
       pixelAspectRatio: undefined,
       hdr: undefined,
+      videoLayout: undefined,
       kind: undefined,
       language: 'en',
+      originalLanguage: 'en',
       label: null,
       width: null,
       height: null,
@@ -420,15 +445,18 @@ describe('ManifestConverter', () => {
         createSegmentDB(
             /* startTime= */ 0,
             /* endTime= */ 10,
-            /* dataKey= */ 1),
+            /* dataKey= */ 1,
+            mimeType, codecs),
         createSegmentDB(
             /* startTime= */ 10,
             /* endTime= */ 20,
-            /* dataKey= */ 2),
+            /* dataKey= */ 2,
+            mimeType, codecs),
         createSegmentDB(
             /* startTime= */ 20,
             /* endTime= */ 25,
-            /* dataKey= */ 3),
+            /* dataKey= */ 3,
+            mimeType, codecs),
       ],
       variantIds,
       roles: [],
@@ -438,6 +466,9 @@ describe('ManifestConverter', () => {
       spatialAudio: false,
       closedCaptions: null,
       tilesLayout: undefined,
+      accessibilityPurpose: null,
+      external: false,
+      fastSwitching: false,
     };
   }
 
@@ -447,18 +478,23 @@ describe('ManifestConverter', () => {
    */
   function createTextStreamDB(id) {
     const ContentType = shaka.util.ManifestParserUtils.ContentType;
+    const mimeType = 'text/vtt';
+    const codecs = '';
     return {
       id,
       originalId: id.toString(),
+      groupId: null,
       primary: false,
       type: ContentType.TEXT,
-      mimeType: 'text/vtt',
-      codecs: '',
+      mimeType,
+      codecs,
       frameRate: undefined,
       pixelAspectRatio: undefined,
       hdr: undefined,
+      videoLayout: undefined,
       kind: undefined,
       language: 'en',
+      originalLanguage: 'en',
       label: null,
       width: null,
       height: null,
@@ -468,15 +504,18 @@ describe('ManifestConverter', () => {
         createSegmentDB(
             /* startTime= */ 0,
             /* endTime= */ 10,
-            /* dataKey= */ 1),
+            /* dataKey= */ 1,
+            mimeType, codecs),
         createSegmentDB(
             /* startTime= */ 10,
             /* endTime= */ 20,
-            /* dataKey= */ 2),
+            /* dataKey= */ 2,
+            mimeType, codecs),
         createSegmentDB(
             /* startTime= */ 20,
             /* endTime= */ 25,
-            /* dataKey= */ 3),
+            /* dataKey= */ 3,
+            mimeType, codecs),
       ],
       variantIds: [],
       roles: [],
@@ -486,6 +525,9 @@ describe('ManifestConverter', () => {
       spatialAudio: false,
       closedCaptions: null,
       tilesLayout: undefined,
+      accessibilityPurpose: null,
+      external: false,
+      fastSwitching: false,
     };
   }
 
@@ -493,6 +535,7 @@ describe('ManifestConverter', () => {
    * @param {?shaka.extern.Stream} stream
    * @param {?shaka.extern.StreamDB} streamDb
    * @param {(?shaka.extern.DrmInfo)=} drmInfo
+   * @suppress {checkTypes}
    */
   function verifyStream(stream, streamDb, drmInfo = null) {
     if (!streamDb) {
@@ -502,9 +545,11 @@ describe('ManifestConverter', () => {
 
     const expectedDrmInfos = streamDb.encrypted ? [drmInfo] : [];
 
+    /** @type {!shaka.extern.Stream} */
     const expectedStream = {
       id: jasmine.any(Number),
       originalId: jasmine.any(String),
+      groupId: streamDb.groupId,
       createSegmentIndex: jasmine.any(Function),
       segmentIndex: jasmine.any(shaka.media.SegmentIndex),
       mimeType: streamDb.mimeType,
@@ -512,6 +557,7 @@ describe('ManifestConverter', () => {
       frameRate: streamDb.frameRate,
       pixelAspectRatio: streamDb.pixelAspectRatio,
       hdr: streamDb.hdr,
+      videoLayout: streamDb.videoLayout,
       width: streamDb.width || undefined,
       height: streamDb.height || undefined,
       kind: streamDb.kind,
@@ -519,6 +565,7 @@ describe('ManifestConverter', () => {
       encrypted: streamDb.encrypted,
       keyIds: streamDb.keyIds,
       language: streamDb.language,
+      originalLanguage: streamDb.originalLanguage,
       label: streamDb.label,
       type: streamDb.type,
       primary: streamDb.primary,
@@ -531,6 +578,11 @@ describe('ManifestConverter', () => {
       spatialAudio: streamDb.spatialAudio,
       closedCaptions: streamDb.closedCaptions,
       tilesLayout: streamDb.tilesLayout,
+      accessibilityPurpose: null,
+      external: streamDb.external,
+      fastSwitching: streamDb.fastSwitching,
+      fullMimeTypes: new Set([shaka.util.MimeUtils.getFullType(
+          streamDb.mimeType, streamDb.codecs)]),
     };
 
     expect(stream).toEqual(expectedStream);

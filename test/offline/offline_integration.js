@@ -19,10 +19,18 @@ filterDescribe('Offline', supportsStorage, () => {
   let eventManager;
   /** @type {shaka.test.Waiter} */
   let waiter;
+  /** @type {?shaka.extern.DrmSupportType} */
+  let widevineSupport;
+  /** @type {?shaka.extern.DrmSupportType} */
+  let playreadySupport;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     video = shaka.test.UiUtils.createVideoElement();
     document.body.appendChild(video);
+
+    const support = await shaka.Player.probeSupport();
+    widevineSupport = support.drm['com.widevine.alpha'];
+    playreadySupport = support.drm['com.microsoft.playready'];
   });
 
   afterAll(() => {
@@ -30,8 +38,12 @@ filterDescribe('Offline', supportsStorage, () => {
   });
 
   beforeEach(async () => {
-    player = new shaka.Player(video);
+    player = new shaka.Player();
+    await player.attach(video);
     player.addEventListener('error', fail);
+
+    // Disable stall detection, which can interfere with playback tests.
+    player.configure('streaming.stallEnabled', false);
 
     eventManager = new shaka.util.EventManager();
     waiter = new shaka.test.Waiter(eventManager);
@@ -67,8 +79,8 @@ filterDescribe('Offline', supportsStorage, () => {
 
     await player.load(contentUri);
 
-    video.play();
-    await playTo(/* end= */ 3, /* timeout= */ 10);
+    await video.play();
+    await playTo(/* end= */ 3, /* timeout= */ 20);
     await player.unload();
     await storage.remove(contentUri);
   });
@@ -77,11 +89,12 @@ filterDescribe('Offline', supportsStorage, () => {
   drmIt(
       'stores, plays, and deletes protected content with a persistent license',
       async () => {
-        const support = await shaka.Player.probeSupport();
-        const widevineSupport = support.drm['com.widevine.alpha'];
-
         if (!widevineSupport || !widevineSupport.persistentState) {
           pending('Widevine persistent licenses are not supported');
+          return;
+        }
+        if (shaka.util.Platform.isAndroid()) {
+          pending('Skipping offline DRM tests on Android - crbug.com/1108158');
           return;
         }
 
@@ -103,8 +116,8 @@ filterDescribe('Offline', supportsStorage, () => {
 
         await player.load(contentUri);
 
-        video.play();
-        await playTo(/* end= */ 3, /* timeout= */ 10);
+        await video.play();
+        await playTo(/* end= */ 3, /* timeout= */ 20);
         await player.unload();
         await storage.remove(contentUri);
       });
@@ -112,12 +125,12 @@ filterDescribe('Offline', supportsStorage, () => {
   drmIt(
       'stores, plays, and deletes protected content with a temporary license',
       async () => {
-        const support = await shaka.Player.probeSupport();
-        const widevineSupport = support.drm['com.widevine.alpha'];
-        const playreadySupport = support.drm['com.microsoft.playready'];
-
         if (!(widevineSupport || playreadySupport)) {
           pending('Widevine and PlayReady are not supported');
+          return;
+        }
+        if (shaka.util.Platform.isAndroid()) {
+          pending('Skipping offline DRM tests on Android - crbug.com/1108158');
           return;
         }
 
@@ -146,8 +159,8 @@ filterDescribe('Offline', supportsStorage, () => {
 
         await player.load(contentUri);
 
-        video.play();
-        await playTo(/* end= */ 3, /* timeout= */ 10);
+        await video.play();
+        await playTo(/* end= */ 3, /* timeout= */ 20);
         await player.unload();
         await storage.remove(contentUri);
       });

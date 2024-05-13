@@ -36,14 +36,14 @@ describe('UI', () => {
     /** @type {!HTMLVideoElement} */
     let video;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       videoContainer =
         /** @type {!HTMLElement} */ (document.createElement('div'));
       document.body.appendChild(videoContainer);
 
       video = shaka.test.UiUtils.createVideoElement();
       videoContainer.appendChild(video);
-      UiUtils.createUIThroughAPI(videoContainer, video);
+      await UiUtils.createUIThroughAPI(videoContainer, video);
     });
 
     it('has all the basic elements', () => {
@@ -123,8 +123,7 @@ describe('UI', () => {
         // multi-video use case. It could be replaces with any other
         // (reasonable) number.
         for (let i = 0; i < 4; i++) {
-          const video = /** @type {!HTMLVideoElement} */
-              (document.createElement('video'));
+          const video = shaka.test.UiUtils.createVideoElement();
 
           document.body.appendChild(video);
           videos.push(video);
@@ -193,7 +192,8 @@ describe('UI', () => {
         ],
         doubleClickForFullscreen: false,
       };
-      const ui = UiUtils.createUIThroughAPI(videoContainer, video, config);
+      const ui = await UiUtils.createUIThroughAPI(
+          videoContainer, video, config);
       const controls = ui.getControls();
 
       const spy = spyOn(controls, 'toggleFullScreen');
@@ -216,8 +216,8 @@ describe('UI', () => {
       /** @type {!HTMLElement} */
       let controlsContainer;
 
-      beforeEach(() => {
-        const ui = UiUtils.createUIThroughAPI(videoContainer, video);
+      beforeEach(async () => {
+        const ui = await UiUtils.createUIThroughAPI(videoContainer, video);
         player = ui.getControls().getLocalPlayer();
         const controlsContainers =
             videoContainer.getElementsByClassName('shaka-controls-container');
@@ -246,13 +246,14 @@ describe('UI', () => {
       /** @type {!HTMLElement} */
       let overflowMenu;
 
-      beforeEach(() => {
+      beforeEach(async () => {
         const config = {
           controlPanelElements: [
             'overflow_menu',
           ],
         };
-        const ui = UiUtils.createUIThroughAPI(videoContainer, video, config);
+        const ui = await UiUtils.createUIThroughAPI(
+            videoContainer, video, config);
         player = ui.getControls().getLocalPlayer();
 
         const overflowMenus =
@@ -323,8 +324,8 @@ describe('UI', () => {
       /** @type {!HTMLElement} */
       let controlsButtonPanel;
 
-      it('has default elements', () => {
-        UiUtils.createUIThroughAPI(videoContainer, video);
+      it('has default elements', async () => {
+        await UiUtils.createUIThroughAPI(videoContainer, video);
         const controlsButtonPanels = videoContainer.getElementsByClassName(
             'shaka-controls-button-panel');
 
@@ -357,7 +358,7 @@ describe('UI', () => {
         }
       });
 
-      it('is accessible', () => {
+      it('is accessible', async () => {
         function confirmAriaLabel(className) {
           const elements =
               controlsButtonPanel.getElementsByClassName(className);
@@ -376,7 +377,7 @@ describe('UI', () => {
           ],
         };
 
-        UiUtils.createUIThroughAPI(videoContainer, video, config);
+        await UiUtils.createUIThroughAPI(videoContainer, video, config);
         const controlsButtonPanels = videoContainer.getElementsByClassName(
             'shaka-controls-button-panel');
         expect(controlsButtonPanels.length).toBe(1);
@@ -403,14 +404,15 @@ describe('UI', () => {
       /** @type {!Element} */
       let languageMenuButton;
 
-      beforeEach(() => {
+      beforeEach(async () => {
         const config = {
           controlPanelElements: [
             'quality',
             'language',
           ],
         };
-        const ui = UiUtils.createUIThroughAPI(videoContainer, video, config);
+        const ui = await UiUtils.createUIThroughAPI(
+            videoContainer, video, config);
         player = ui.getControls().getLocalPlayer();
 
         const resolutionsMenus =
@@ -473,7 +475,7 @@ describe('UI', () => {
       /** @type {shaka.ui.Controls} */
       let controls;
 
-      beforeEach(() => {
+      beforeEach(async () => {
         const config = {
           controlPanelElements: [
             'overflow_menu',
@@ -482,7 +484,8 @@ describe('UI', () => {
             'quality',
           ],
         };
-        const ui = UiUtils.createUIThroughAPI(videoContainer, video, config);
+        const ui = await UiUtils.createUIThroughAPI(
+            videoContainer, video, config);
         controls = ui.getControls();
         player = controls.getLocalPlayer();
 
@@ -616,18 +619,9 @@ describe('UI', () => {
         player.configure('abr.enabled', false);
 
         const tracks = player.getVariantTracks();
-        const en2 =
-            tracks.find((t) => t.language == 'en' && t.channelsCount == 2);
         const en1 =
             tracks.find((t) => t.language == 'en' && t.channelsCount == 1);
         const es = tracks.find((t) => t.language == 'es');
-
-        // There are 3 variants with English 2-channel, but one is a duplicate
-        // and shouldn't appear in the list.
-        goog.asserts.assert(en2, 'Unable to find tracks');
-        player.selectVariantTrack(en2, true);
-        await updateResolutionMenu();
-        expect(getResolutions()).toEqual(['240p', '480p']);
 
         // There is 1 variant with English 1-channel.
         goog.asserts.assert(en1, 'Unable to find tracks');
@@ -646,7 +640,9 @@ describe('UI', () => {
         const manifest =
           shaka.test.ManifestGenerator.generate((manifest) => {
             manifest.addVariant(0, (variant) => {
-              variant.addAudio(0);
+              variant.addAudio(0, (stream) => {
+                stream.roles = ['main'];
+              });
               variant.bandwidth = 100000;
             });
             manifest.addVariant(1, (variant) => {
@@ -703,7 +699,7 @@ describe('UI', () => {
       /** @type {!HTMLElement} */
       let contextMenu;
 
-      beforeEach(() => {
+      beforeEach(async () => {
         const config = {
           customContextMenu: true,
           contextMenuElements: [
@@ -712,7 +708,8 @@ describe('UI', () => {
             'fakeElement',
           ],
         };
-        const ui = UiUtils.createUIThroughAPI(videoContainer, video, config);
+        const ui = await UiUtils.createUIThroughAPI(
+            videoContainer, video, config);
 
         controlsContainer = ui.getControls().getControlsContainer();
 
@@ -730,6 +727,7 @@ describe('UI', () => {
         UiUtils.simulateEvent(controlsContainer, 'contextmenu');
         expect(contextMenu.classList.contains('shaka-hidden')).toBe(true);
       });
+
       it('hides on click event', () => {
         UiUtils.simulateEvent(controlsContainer, 'contextmenu');
         UiUtils.simulateEvent(controlsContainer, 'click');
@@ -738,6 +736,7 @@ describe('UI', () => {
         UiUtils.simulateEvent(window, 'click');
         expect(contextMenu.classList.contains('shaka-hidden')).toBe(true);
       });
+
       it('builds internal elements', () => {
         expect(contextMenu.childNodes.length).toBe(1);
 
@@ -752,7 +751,7 @@ describe('UI', () => {
       /** @type {!HTMLElement} */
       let statisticsContainer;
 
-      beforeEach(() => {
+      beforeEach(async () => {
         const config = {
           customContextMenu: true,
           contextMenuElements: [
@@ -760,7 +759,8 @@ describe('UI', () => {
           ],
           statisticsList: Object.keys(new shaka.util.Stats().getBlob()),
         };
-        const ui = UiUtils.createUIThroughAPI(videoContainer, video, config);
+        const ui = await UiUtils.createUIThroughAPI(
+            videoContainer, video, config);
         player = ui.getControls().getLocalPlayer();
 
         const statisticsButtons =
@@ -808,6 +808,7 @@ describe('UI', () => {
           }
         }
       });
+
       it('is updated periodically', async () => {
         // There is no guaranteed ordering, so fetch by the stat name.
         function getStatsElementByName(name) {
@@ -839,11 +840,11 @@ describe('UI', () => {
         /** @type {!string} */
         let lastBufferingTime;
 
-        const manifest =
-        shaka.test.ManifestGenerator.generate((manifest) => {
+        const manifest = shaka.test.ManifestGenerator.generate((manifest) => {
           manifest.addVariant(/* id= */ 0, (variant) => {
             variant.addVideo(1, (stream) => {
-              stream.size(1920, 1080);
+              // Keep this at 720p to pass max-height checks on Chromecast Hub.
+              stream.size(1280, 720);
             });
           });
         });
@@ -865,8 +866,8 @@ describe('UI', () => {
         await Util.delay(0.2);
 
         getStatsFromContainer();
-        expect(width).toBe('1920');
-        expect(height).toBe('1080');
+        expect(width).toBe('1280');
+        expect(height).toBe('720');
         expect(bufferingTime).toBeGreaterThanOrEqual(0.1);
 
         // Statistics are updated over time

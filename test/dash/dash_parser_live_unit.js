@@ -26,8 +26,6 @@ describe('DashParser Live', () => {
     parser.configure(shaka.util.PlayerConfiguration.createDefault().manifest);
     playerInterface = {
       networkingEngine: fakeNetEngine,
-      modifyManifestRequest: (request, manifestInfo) => {},
-      modifySegmentRequest: (request, segmentInfo) => {},
       filter: (manifest) => Promise.resolve(),
       makeTextStreamsForClosedCaptions: (manifest) => {},
       onTimelineRegionAdded: fail,  // Should not have any EventStream elements.
@@ -36,6 +34,10 @@ describe('DashParser Live', () => {
       isLowLatencyMode: () => false,
       isAutoLowLatencyMode: () => false,
       enableLowLatencyMode: () => {},
+      updateDuration: () => {},
+      newDrmInfo: (stream) => {},
+      onManifestUpdated: () => {},
+      getBandwidthEstimate: () => 1e6,
     };
   });
 
@@ -192,7 +194,8 @@ describe('DashParser Live', () => {
           template, {updateTime: updateTime, contents: basicLines.join('\n')});
 
       fakeNetEngine.setResponseText('dummy://foo', text);
-      Date.now = () => 0;
+      const baseTime = new Date(2015, 11, 30);
+      Date.now = () => baseTime.getTime();
       const manifest = await parser.start('dummy://foo', playerInterface);
 
       expect(manifest).toBeTruthy();
@@ -209,7 +212,7 @@ describe('DashParser Live', () => {
       // seconds long in all of these cases.  So 11 seconds after the
       // manifest was parsed, the first segment should have fallen out of
       // the availability window.
-      Date.now = () => 11 * 1000;
+      Date.now = () => baseTime.getTime() + (11 * 1000);
       await updateManifest();
       // The first reference should have been evicted.
       expect(stream.segmentIndex.find(0)).toBe(firstPosition + 1);
@@ -588,6 +591,8 @@ describe('DashParser Live', () => {
     const onError = jasmine.createSpy('onError');
     playerInterface.onError = Util.spyFunc(onError);
 
+    const updateTick = updateTickSpy();
+
     fakeNetEngine.setResponseText('dummy://foo', manifestText);
     await parser.start('dummy://foo', playerInterface);
 
@@ -602,6 +607,58 @@ describe('DashParser Live', () => {
 
     await updateManifest();
     expect(onError).toHaveBeenCalledTimes(1);
+    expect(updateTick).toHaveBeenCalledTimes(2);
+  });
+
+  it('fatal error on manifest update request failure when ' +
+      'raiseFatalErrorOnManifestUpdateRequestFailure is true', async () => {
+    const manifestConfig =
+      shaka.util.PlayerConfiguration.createDefault().manifest;
+    manifestConfig.raiseFatalErrorOnManifestUpdateRequestFailure = true;
+    parser.configure(manifestConfig);
+
+    const updateTick = updateTickSpy();
+
+    const lines = [
+      '<SegmentTemplate startNumber="1" media="s$Number$.mp4" duration="2"/>',
+    ];
+    const manifestText = makeSimpleLiveManifestText(lines, updateTime);
+    /** @type {!jasmine.Spy} */
+    const onError = jasmine.createSpy('onError');
+    playerInterface.onError = Util.spyFunc(onError);
+
+    fakeNetEngine.setResponseText('dummy://foo', manifestText);
+    await parser.start('dummy://foo', playerInterface);
+
+    const error = new shaka.util.Error(
+        shaka.util.Error.Severity.CRITICAL,
+        shaka.util.Error.Category.NETWORK,
+        shaka.util.Error.Code.BAD_HTTP_STATUS);
+    const operation = shaka.util.AbortableOperation.failed(error);
+    fakeNetEngine.request.and.returnValue(operation);
+
+    await updateManifest();
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(updateTick).toHaveBeenCalledTimes(1);
+  });
+
+  it('still updates when @minimumUpdatePeriod is zero', async () => {
+    const lines = [
+      '<SegmentTemplate startNumber="1" media="s$Number$.mp4" duration="2" />',
+    ];
+    // updateTime parameter sets @minimumUpdatePeriod in the manifest.
+    const manifestText = makeSimpleLiveManifestText(lines, /* updateTime= */ 0);
+
+    /** @type {!jasmine.Spy} */
+    const tickAfter = updateTickSpy();
+    Date.now = () => 0;
+
+    fakeNetEngine.setResponseText('dummy://foo', manifestText);
+    await parser.start('dummy://foo', playerInterface);
+
+    expect(tickAfter).toHaveBeenCalledTimes(1);
+    const delay = tickAfter.calls.mostRecent().args[0];
+    expect(delay).toBe(0);
   });
 
   it('uses @minimumUpdatePeriod', async () => {
@@ -621,26 +678,6 @@ describe('DashParser Live', () => {
     expect(tickAfter).toHaveBeenCalledTimes(1);
     const delay = tickAfter.calls.mostRecent().args[0];
     expect(delay).toBe(updateTime);
-  });
-
-  it('still updates when @minimumUpdatePeriod is zero', async () => {
-    const lines = [
-      '<SegmentTemplate startNumber="1" media="s$Number$.mp4" duration="2" />',
-    ];
-    // updateTime parameter sets @minimumUpdatePeriod in the manifest.
-    const manifestText = makeSimpleLiveManifestText(lines, /* updateTime= */ 0);
-
-    /** @type {!jasmine.Spy} */
-    const tickAfter = updateTickSpy();
-    Date.now = () => 0;
-
-    fakeNetEngine.setResponseText('dummy://foo', manifestText);
-    await parser.start('dummy://foo', playerInterface);
-
-    const waitTime = shaka.dash.DashParser['MIN_UPDATE_PERIOD_'];
-    expect(tickAfter).toHaveBeenCalledTimes(1);
-    const delay = tickAfter.calls.mostRecent().args[0];
-    expect(delay).toBe(waitTime);
   });
 
   it('does not update when @minimumUpdatePeriod is missing', async () => {
@@ -665,8 +702,7 @@ describe('DashParser Live', () => {
       '<SegmentTemplate startNumber="1" media="s$Number$.mp4" duration="2" />',
     ];
     const extraWaitTime = 15.0;
-    const idealUpdateTime = shaka.dash.DashParser['MIN_UPDATE_PERIOD_'];
-    const manifestText = makeSimpleLiveManifestText(lines, idealUpdateTime);
+    const manifestText = makeSimpleLiveManifestText(lines, 3);
 
     let now = 0;
     Date.now = () => now;
@@ -706,17 +742,21 @@ describe('DashParser Live', () => {
     fakeNetEngine.setResponseText('dummy://foo', manifestText);
 
     const manifestRequest = shaka.net.NetworkingEngine.RequestType.MANIFEST;
+    const manifestContext = {
+      type: shaka.net.NetworkingEngine.AdvancedRequestType.MPD,
+    };
     await parser.start('dummy://foo', playerInterface);
 
     expect(fakeNetEngine.request).toHaveBeenCalledTimes(1);
-    fakeNetEngine.expectRequest('dummy://foo', manifestRequest);
+    fakeNetEngine.expectRequest('dummy://foo', manifestRequest, manifestContext);
     fakeNetEngine.request.calls.reset();
 
     // Create a mock so we can verify it gives two URIs.
     // The third location is a relative url, and should be resolved as an
     // absolute url.
-    fakeNetEngine.request.and.callFake((type, request) => {
+    fakeNetEngine.request.and.callFake((type, request, context) => {
       expect(type).toBe(manifestRequest);
+      expect(context).toEqual(manifestContext);
       expect(request.uris).toEqual(
           ['http://foobar', 'http://foobar2', 'dummy://foo/foobar3']);
       const data = shaka.util.StringUtils.toUTF8(manifestText);
@@ -949,6 +989,9 @@ describe('DashParser Live', () => {
 
   describe('stop', () => {
     const manifestRequestType = shaka.net.NetworkingEngine.RequestType.MANIFEST;
+    const manifestContext = {
+      type: shaka.net.NetworkingEngine.AdvancedRequestType.MPD,
+    };
     const dateRequestType = shaka.net.NetworkingEngine.RequestType.TIMING;
     const manifestUri = 'dummy://foo';
     const dateUri = 'http://foo.bar/date';
@@ -980,7 +1023,8 @@ describe('DashParser Live', () => {
     it('stops updates', async () => {
       await parser.start(manifestUri, playerInterface);
 
-      fakeNetEngine.expectRequest(manifestUri, manifestRequestType);
+      fakeNetEngine.expectRequest(
+          manifestUri, manifestRequestType, manifestContext);
       fakeNetEngine.request.calls.reset();
 
       parser.stop();
@@ -998,7 +1042,8 @@ describe('DashParser Live', () => {
       parser.stop();
       await expectation;
 
-      fakeNetEngine.expectRequest(manifestUri, manifestRequestType);
+      fakeNetEngine.expectRequest(
+          manifestUri, manifestRequestType, manifestContext);
       fakeNetEngine.request.calls.reset();
       await updateManifest();
       // An update should not occur.
@@ -1009,7 +1054,8 @@ describe('DashParser Live', () => {
       const manifest = await parser.start('dummy://foo', playerInterface);
 
       expect(manifest).toBeTruthy();
-      fakeNetEngine.expectRequest(manifestUri, manifestRequestType);
+      fakeNetEngine.expectRequest(
+          manifestUri, manifestRequestType, manifestContext);
       fakeNetEngine.request.calls.reset();
       /** @type {!shaka.util.PublicPromise} */
       const delay = fakeNetEngine.delayNextRequest();
@@ -1017,7 +1063,8 @@ describe('DashParser Live', () => {
       await updateManifest();
       // The request was made but should not be resolved yet.
       expect(fakeNetEngine.request).toHaveBeenCalledTimes(1);
-      fakeNetEngine.expectRequest(manifestUri, manifestRequestType);
+      fakeNetEngine.expectRequest(
+          manifestUri, manifestRequestType, manifestContext);
       fakeNetEngine.request.calls.reset();
       parser.stop();
       delay.resolve();
@@ -1038,7 +1085,8 @@ describe('DashParser Live', () => {
       await Util.shortDelay();
       // This is the initial manifest request.
       expect(fakeNetEngine.request).toHaveBeenCalledTimes(1);
-      fakeNetEngine.expectRequest(manifestUri, manifestRequestType);
+      fakeNetEngine.expectRequest(
+          manifestUri, manifestRequestType, manifestContext);
       fakeNetEngine.request.calls.reset();
       // Resolve the manifest request and wait on the UTCTiming request.
       delay.resolve();
@@ -1272,6 +1320,7 @@ describe('DashParser Live', () => {
         endTime: 60,
         id: '',
         eventElement: jasmine.any(Element),
+        eventNode: jasmine.any(Object),
       });
       expect(onTimelineRegionAddedSpy).toHaveBeenCalledWith({
         schemeIdUri: 'http://example.com',
@@ -1280,6 +1329,7 @@ describe('DashParser Live', () => {
         endTime: 23,
         id: 'abc',
         eventElement: jasmine.any(Element),
+        eventNode: jasmine.any(Object),
       });
     });
 
@@ -1509,5 +1559,67 @@ describe('DashParser Live', () => {
       shaka.test.ManifestParser.makeReference('s4.mp4', 6, 8, originalUri),
       shaka.test.ManifestParser.makeReference('s5.mp4', 8, 10, originalUri),
     ]);
+  });
+
+  it('supports ContentSteering with location change', async () => {
+    const manifestText = [
+      '<MPD type="dynamic" availabilityStartTime="1970-01-01T00:00:00Z"',
+      '    suggestedPresentationDelay="PT5S"',
+      '    minimumUpdatePeriod="PT' + updateTime + 'S">',
+      '  <Location serviceLocation="a">http://foobar</Location>',
+      '  <Location serviceLocation="b">http://foobar2</Location>',
+      '  <Location serviceLocation="c">foobar3</Location>',
+      '  <ContentSteering defaultServiceLocation="b" ',
+      'queryBeforeStart="true">http://contentsteering</ContentSteering>',
+      '  <Period id="1" duration="PT10S">',
+      '    <AdaptationSet mimeType="video/mp4">',
+      '      <Representation id="3" bandwidth="500">',
+      '<SegmentTemplate startNumber="1" media="s$Number$.mp4" duration="2" />',
+      '      </Representation>',
+      '    </AdaptationSet>',
+      '  </Period>',
+      '</MPD>',
+    ].join('\n');
+
+    const contentSteering = JSON.stringify({
+      'VERSION': 1,
+      'TTL': 100,
+      'RELOAD-URI': 'http://contentsteering/update',
+      'PATHWAY-PRIORITY': [
+        'a',
+        'c',
+        'b',
+      ],
+    });
+
+    fakeNetEngine
+        .setResponseText('dummy://foo', manifestText)
+        .setResponseText('http://contentsteering', contentSteering)
+        .setMaxUris(3);
+
+    const manifestRequest = shaka.net.NetworkingEngine.RequestType.MANIFEST;
+    const manifestContext = {
+      type: shaka.net.NetworkingEngine.AdvancedRequestType.MPD,
+    };
+
+    await parser.start('dummy://foo', playerInterface);
+
+    fakeNetEngine.request.calls.reset();
+
+    // Create a mock so we can verify it gives two URIs.
+    // The third location is a relative url, and should be resolved as an
+    // absolute url.
+    fakeNetEngine.request.and.callFake((type, request, context) => {
+      expect(type).toBe(manifestRequest);
+      expect(context).toEqual(manifestContext);
+      expect(request.uris).toEqual(
+          ['http://foobar', 'dummy://foo/foobar3', 'http://foobar2']);
+      const data = shaka.util.StringUtils.toUTF8(manifestText);
+      return shaka.util.AbortableOperation.completed(
+          {uri: request.uris[0], data: data, headers: {}});
+    });
+
+    await updateManifest();
+    expect(fakeNetEngine.request).toHaveBeenCalledTimes(1);
   });
 });

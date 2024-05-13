@@ -9,13 +9,15 @@ shaka.test.UiUtils = class {
    * @param {!HTMLElement} videoContainer
    * @param {!HTMLMediaElement} video
    * @param {!Object=} config
-   * @return {!shaka.ui.Overlay}
+   * @param {?HTMLCanvasElement=} canvas
+   * @return {!Promise.<!shaka.ui.Overlay>}
    */
-  static createUIThroughAPI(videoContainer, video, config) {
-    const player = new shaka.Player(video);
+  static async createUIThroughAPI(videoContainer, video, config, canvas) {
+    const player = new shaka.Player();
+    await player.attach(video);
     // Create UI
     config = config || {};
-    const ui = new shaka.ui.Overlay(player, videoContainer, video);
+    const ui = new shaka.ui.Overlay(player, videoContainer, video, canvas);
     // TODO: generate externs automatically from @event types
     // This event should be a shaka.Player.ErrorEvent
     ui.getControls().addEventListener('error', (e) => fail(e['detail']));
@@ -115,11 +117,18 @@ shaka.test.UiUtils = class {
       // Destroying the UI destroys the controls and player inside.
       destroys.push(ui.destroy());
     }
-    await Promise.all(destroys);
+
+    const allDestroyed = Promise.all(destroys);
+    // 10 seconds should be more than enough to tear down the UI.
+    // Adding this silent timeout fixes several tests that inconsistently hang
+    // during teardown and cause failures in afterEach() clauses.
+    await Promise.race([allDestroyed, shaka.test.Util.delay(10)]);
 
     // Now remove all the containers from the DOM.
     for (const container of containers) {
-      container.parentElement.removeChild(container);
+      if (container.parentElement) {
+        container.parentElement.removeChild(container);
+      }
     }
   }
 
@@ -162,10 +171,28 @@ shaka.test.UiUtils = class {
     const video = /** @type {!HTMLVideoElement} */(document.createElement(
         'video'));
 
-    video.muted = true;
+    // Some platforms have issues with audio-only playbacks on muted video
+    // elements. Don't mute them.
+    // Fuchsia reference: https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/media/web_media_player_impl.cc;l=3535;drc=d23075f3
+    if (!shaka.util.Platform.isTizen() &&
+        !shaka.util.Platform.isFuchsiaCastDevice()) {
+      video.muted = true;
+    }
     video.width = 600;
     video.height = 400;
 
     return video;
+  }
+
+  /**
+   * Creates a canvas element for testing.
+   *
+   * @return {!HTMLCanvasElement}
+   */
+  static createCanvasElement() {
+    const canvas = /** @type {!HTMLCanvasElement} */(document.createElement(
+        'canvas'));
+
+    return canvas;
   }
 };

@@ -1,20 +1,18 @@
-# Alpine was chosen by providing a node container less than 100mb
-FROM node:17.7.1-alpine3.15
+# Build with:
+#   docker build -t shaka-player-build /path/to/shaka-player/build/docker
+# Run with:
+#   docker run -v /path/to/shaka-player:/usr/src --user $(id -u):$(id -g) shaka-player-build
+# Run tests with:
+#   docker run -v /path/to/shaka-player:/usr/src --user $(id -u):$(id -g) shaka-player-build python3 build/test.py --quick --browsers ChromeHeadless
 
-WORKDIR /usr/src/app
+FROM alpine:3.18
 
 # Install dependencies
-RUN apk add --update --no-cache openssh git python3 openjdk11-jre-headless
-RUN ln -sf python3 /usr/bin/python
+RUN apk add --update --no-cache \
+  bash chromium chromium-chromedriver git nodejs npm openjdk11-jre-headless python3
 
-# Change to non-root user
-USER node
+WORKDIR /usr/src
+ENV HOME /tmp
+ENV CHROMEDRIVER_PATH /usr/bin/chromedriver
 
-# Prevent proxy timeout error (very slow connections)
-RUN npm config set fetch-retry-mintimeout 20000
-RUN npm config set fetch-retry-maxtimeout 120000
-RUN npm config rm proxy
-RUN npm config rm https-proxy
-
-# Run compilation
-CMD [ "python", "build/all.py" ]
+CMD ["python3", "build/all.py"]

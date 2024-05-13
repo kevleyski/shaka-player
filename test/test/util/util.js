@@ -89,10 +89,11 @@ shaka.test.Util = class {
    * given value.
    *
    * @param {number} val
+   * @param {number=} maxDelta
    * @return {number}
    */
-  static closeTo(val) {
-    const E = 0.000001;
+  static closeTo(val, maxDelta = 0.000001) {
+    const E = /** @type {number} */(maxDelta);
     return /** @type {number} */(/** @type {?} */({
       asymmetricMatch: (other) => other >= val - E && other <= val + E,
       jasmineToString: () => '<closeTo: ' + val + '>',
@@ -153,7 +154,7 @@ shaka.test.Util = class {
         (expected['outerHTML'] || expected.textContent) + ': ';
     const getAttr = (obj, attr) => {
       if (attr.namespaceURI) {
-        return shaka.util.XmlUtils.getAttributeNS(
+        return shaka.util.TXml.getAttributeNS(
             obj, attr.namespaceURI, attr.localName);
       } else {
         return obj.getAttribute(attr.localName);
@@ -229,12 +230,17 @@ shaka.test.Util = class {
       }
 
       // Make shallow copies of each, without their getUris fields.
+      // Also remove mimeType and codecs.
       const trimmedFirst = Object.assign({}, /** @type {Object} */(firstRef));
       delete trimmedFirst['getUris'];
       delete trimmedFirst['getUrisInner'];
+      delete trimmedFirst['mimeType'];
+      delete trimmedFirst['codecs'];
       const trimmedSecond = Object.assign({}, /** @type {Object} */(secondRef));
       delete trimmedSecond['getUris'];
       delete trimmedSecond['getUrisInner'];
+      delete trimmedSecond['mimeType'];
+      delete trimmedSecond['codecs'];
 
       // Compare those using Jasmine's utility, which will compare the fields of
       // an object and the items of an array.
@@ -254,33 +260,12 @@ shaka.test.Util = class {
    * @param {string} uri
    * @return {!Promise.<!ArrayBuffer>}
    */
-  static fetch(uri) {
-    return new Promise(((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', uri, /* asynchronous= */ true);
-      xhr.responseType = 'arraybuffer';
-
-      xhr.onload = (event) => {
-        if (xhr.status >= 200 &&
-            xhr.status <= 299 &&
-            !!xhr.response) {
-          resolve(/** @type {!ArrayBuffer} */(xhr.response));
-        } else {
-          let message = '';
-          if (xhr.response) {
-            message = ': ' + shaka.util.StringUtils.fromUTF8(
-                /** @type {!ArrayBuffer} */(xhr.response));
-          }
-          reject(xhr.status + message);
-        }
-      };
-
-      xhr.onerror = (event) => {
-        reject('shaka.test.Util.fetch failed: ' + uri);
-      };
-
-      xhr.send(/* body= */ null);
-    }));
+  static async fetch(uri) {
+    const response = await fetch(uri);
+    if (!response.ok) {
+      throw new Error('shaka.test.Util.fetch failed: ' + uri);
+    }
+    return response.arrayBuffer();
   }
 
   /**
@@ -327,123 +312,60 @@ shaka.test.Util = class {
   }
 
   /**
-   * Waits for a particular font to be loaded.  Useful in screenshot tests to
-   * make sure we have consistent results with regard to the web fonts we load
-   * in the UI.
-   *
-   * @param {string} name
-   * @return {!Promise}
-   */
-  static async waitForFont(name) {
-    await new Promise((resolve, reject) => {
-      // https://github.com/zachleat/fontfaceonload
-      // eslint-disable-next-line new-cap
-      FontFaceOnload(name, {
-        success: resolve,
-        error: () => {
-          reject(new Error('Timeout waiting for font ' + name + ' to load'));
-        },
-        timeout: 10 * 1000,  // ms
-      });
-    });
-
-    // Wait one extra tick to make sure the font rendering on the page has been
-    // updated.  Without this, we saw some rare test flake in Firefox on Mac.
-    await this.shortDelay();
-  }
-
-  /**
-   * Checks with Karma to see if this browser can take a screenshot.
-   *
-   * Only WebDriver-connected browsers can take a screenshot, and only Karma
-   * knows if the browser is connected via WebDriver.  So this must be checked
-   * in Karma via an HTTP request.
-   *
+   * @param {!string} mimetype
+   * @param {?number=} width
+   * @param {?number=} height
    * @return {!Promise.<boolean>}
    */
-  static async supportsScreenshots() {
-    // We need our own ID for Karma to look up the WebDriver connection.
-    // For manually-connected browsers, this ID may not exist.  In those cases,
-    // this method is expected to return false.
-    const parentUrlParams = window.parent.location.search;
+  static async isTypeSupported(mimetype, width, height) {
+    const MimeUtils = shaka.util.MimeUtils;
+    const StreamUtils = shaka.util.StreamUtils;
 
-    const buffer = await shaka.test.Util.fetch(
-        '/screenshot/isSupported' + parentUrlParams);
-    const json = shaka.util.StringUtils.fromUTF8(buffer);
-    const ok = /** @type {boolean} */(JSON.parse(json));
-    return ok;
-  }
+    /** @type {!MediaDecodingConfiguration} */
+    const mediaDecodingConfig = {
+      type: 'media-source',
+    };
+    if (mimetype.startsWith('audio')) {
+      const codecs = StreamUtils.getCorrectAudioCodecs(
+          MimeUtils.getCodecs(mimetype));
+      if (codecs == 'ac-3' && shaka.util.Platform.isTizen()) {
+        // AC3 is flaky in some Tizen devices, so we need omit it for now.
+        return false;
+      }
+      if ((codecs == 'ec-3' || codecs == 'ac-3') &&
+          shaka.util.Platform.isWindows() && shaka.util.Platform.isEdge()) {
+        // It seems that AC3 and EC3 on Edge Windows from github actions is not
+        // working (in the lab AC3 and EC3 are working). The AC3 and EC3
+        // detection is currently hard-coded to true, which leads to a failure
+        // in GitHub's environment. We must enable this, once it is resolved:
+        // https://bugs.chromium.org/p/chromium/issues/detail?id=1450313
+        return false;
+      }
+      // AudioConfiguration
+      mediaDecodingConfig.audio = {
+        contentType: mimetype,
+      };
+    } else {
+      // VideoConfiguration
+      mediaDecodingConfig.video = {
+        contentType: mimetype,
 
-  /**
-   * Asks Karma to take a screenshot for us via the WebDriver connection and
-   * compare it to the "official" screenshot for this test and platform.  Sets
-   * an expectation that the new screenshot does not differ from the official
-   * screenshot more than a fixed threshold.
-   *
-   * Only works on browsers connected via WebDriver.  Use supportsScreenshots()
-   * to filter screenshot-dependent tests.
-   *
-   * @param {!HTMLElement} element The HTML element to screenshot.  Must be
-   *   within the bounds of the viewport.
-   * @param {string} name An identifier for the screenshot.  Use alphanumeric
-   *   plus dash and underscore only.
-   * @param {number} minSimilarity A minimum similarity score between 0 and 1.
-   * @return {!Promise}
-   */
-  static async checkScreenshot(element, name, minSimilarity=1) {
-    // Make sure the DOM is up-to-date and layout has settled before continuing.
-    // Without this delay, or with a shorter delay, we sometimes get missing
-    // elements in our UITextDisplayer tests on some platforms.
-    await this.delay(0.1);
+        // NOTE: Some decoders strictly check the width and height fields and
+        // won't decode smaller than 64x64.  So if we don't have this info (as
+        // is the case in some of our simpler tests), assume a 64x64
+        // resolution to fill in this required field for MediaCapabilities.
+        //
+        // This became an issue specifically on Firefox on M1 Macs.
+        width: width || 64,
+        height: height || 64,
 
-    // We need our own ID for Karma to look up the WebDriver connection.
-    // By this point, we should have passed supportsScreenshots(), so the ID
-    // should definitely be there.
-    const parentUrlParams = window.parent.location.search;
-    goog.asserts.assert(parentUrlParams.includes('id='), 'No ID in URL!');
-
-    // Tests run in an iframe.  So we also need the coordinates of that iframe
-    // within the page, so that the screenshot can be consistently cropped to
-    // the element we care about.
-    const iframe = /** @type {HTMLIFrameElement} */(
-      window.parent.document.getElementById('context'));
-    const iframeRect = iframe.getBoundingClientRect();
-    const elementRect = element.getBoundingClientRect();
-    const x = iframeRect.left + elementRect.left;
-    const y = iframeRect.top + elementRect.top;
-    const width = elementRect.width;
-    const height = elementRect.height;
-
-    // Furthermore, the screenshot may not be at the scale you expect.  Measure
-    // the browser window size in JavaScript and communicate that to Karma, too,
-    // so it can convert coordinates before cropping.  This value, as opposed to
-    // document.body.getBoundingClientRect(), seems to most accurately reflect
-    // the size of the screenshot area.
-    const bodyWidth = window.parent.innerWidth;
-    const bodyHeight = window.parent.innerHeight;
-
-    // In addition to the id param from the top-level window, pass these
-    // parameters to the screenshot endpoint in Karma.
-    const params = {x, y, width, height, bodyWidth, bodyHeight, name};
-
-    let paramsString = '';
-    for (const k in params) {
-      paramsString += '&' + k + '=' + params[k];
+        bitrate: 1,
+        framerate: 1,
+      };
     }
-
-    const buffer = await shaka.test.Util.fetch(
-        '/screenshot/diff' + parentUrlParams + paramsString);
-    const json = shaka.util.StringUtils.fromUTF8(buffer);
-    const similarity = /** @type {number} */(JSON.parse(json));
-
-    // If the minimum similarity is not met, you can review the new screenshot
-    // and the diff image in the screenshots folder.  Look for images that end
-    // with "-new" and "-diff".  (NOTE: The diff is a pixel-wise diff for human
-    // review, and is not produced with the same structural similarity
-    // algorithm used to detect changes in the test.)  If cropping doesn't work
-    // right, you can view the full-page screenshot in the image that ends with
-    // "-full".
-    expect(similarity).withContext(name).not.toBeLessThan(minSimilarity);
+    const result =
+        await navigator.mediaCapabilities.decodingInfo(mediaDecodingConfig);
+    return result.supported;
   }
 };
 

@@ -29,10 +29,14 @@ shaka.ui.Overlay = class {
    * @param {!shaka.Player} player
    * @param {!HTMLElement} videoContainer
    * @param {!HTMLMediaElement} video
+   * @param {?HTMLCanvasElement=} vrCanvas
    */
-  constructor(player, videoContainer, video) {
+  constructor(player, videoContainer, video, vrCanvas = null) {
     /** @private {shaka.Player} */
     this.player_ = player;
+
+    /** @private {HTMLElement} */
+    this.videoContainer_ = videoContainer;
 
     /** @private {!shaka.extern.UIConfiguration} */
     this.config_ = this.defaultConfig_();
@@ -49,7 +53,7 @@ shaka.ui.Overlay = class {
 
     /** @private {shaka.ui.Controls} */
     this.controls_ = new shaka.ui.Controls(
-        player, videoContainer, video, this.config_);
+        player, videoContainer, video, vrCanvas, this.config_);
 
     // Run the initial setup so that no configure() call is required for default
     // settings.
@@ -186,6 +190,8 @@ shaka.ui.Overlay = class {
         'picture_in_picture',
         'cast',
         'playback_rate',
+        'recenter_vr',
+        'toggle_stereoscopic',
       ],
       statisticsList: [
         'width',
@@ -205,6 +211,7 @@ shaka.ui.Overlay = class {
         'pauseTime',
         'playTime',
         'completionPercent',
+        'bytesDownloaded',
       ],
       contextMenuElements: [
         'loop',
@@ -232,6 +239,7 @@ shaka.ui.Overlay = class {
         level: 'rgb(255, 255, 255)',
       },
       trackLabelFormat: shaka.ui.Overlay.TrackLabelFormat.LANGUAGE,
+      textTrackLabelFormat: shaka.ui.Overlay.TrackLabelFormat.LANGUAGE,
       fadeDelay: 0,
       doubleClickForFullscreen: true,
       singleClickForPlayAndPause: true,
@@ -240,10 +248,21 @@ shaka.ui.Overlay = class {
       forceLandscapeOnFullscreen: true,
       enableTooltips: false,
       keyboardSeekDistance: 5,
+      keyboardLargeSeekDistance: 60,
+      fullScreenElement: this.videoContainer_,
+      preferDocumentPictureInPicture: true,
+      showAudioChannelCountVariants: true,
+      seekOnTaps: true,
+      tapSeekDistance: 10,
+      refreshTickInSeconds: 0.125,
+      displayInVrMode: false,
+      defaultVrProjectionMode: 'equirectangular',
     };
 
-    // Check AirPlay support
-    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+    // eslint-disable-next-line no-restricted-syntax
+    if ('remote' in HTMLMediaElement.prototype) {
+      config.overflowMenuButtons.push('remote');
+    } else if (window.WebKitPlaybackTargetAvailabilityEvent) {
       config.overflowMenuButtons.push('airplay');
     }
 
@@ -296,6 +315,12 @@ shaka.ui.Overlay = class {
     const canvases = document.querySelectorAll(
         '[data-shaka-player-canvas]');
 
+    // Look for elements marked 'data-shaka-player-vr-canvas'
+    // on the page. These will be used to create our default
+    // UI.
+    const vrCanvases = document.querySelectorAll(
+        '[data-shaka-player-vr-canvas]');
+
     if (!videos.length && !containers.length) {
       // No elements have been tagged with shaka attributes.
     } else if (videos.length && !containers.length) {
@@ -313,21 +338,11 @@ shaka.ui.Overlay = class {
         const videoParent = video.parentElement;
         videoParent.replaceChild(container, video);
         container.appendChild(video);
-        let currentCanvas = null;
-        for (const canvas of canvases) {
-          goog.asserts.assert(canvas.tagName.toLowerCase() == 'canvas',
-              'Should be a canvas element!');
-          if (canvas.parentElement == container) {
-            currentCanvas = canvas;
-            break;
-          }
-        }
-        if (!currentCanvas) {
-          currentCanvas = document.createElement('canvas');
-          currentCanvas.classList.add('shaka-canvas-container');
-          container.appendChild(currentCanvas);
-        }
-        shaka.ui.Overlay.setupUIandAutoLoad_(container, video, currentCanvas);
+        const {lcevcCanvas, vrCanvas} =
+            shaka.ui.Overlay.findOrMakeSpecialCanvases_(
+                container, canvases, vrCanvases);
+        shaka.ui.Overlay.setupUIandAutoLoad_(
+            container, video, lcevcCanvas, vrCanvas);
       }
     } else {
       for (const container of containers) {
@@ -354,26 +369,13 @@ shaka.ui.Overlay = class {
           currentVideo.setAttribute('playsinline', '');
           container.appendChild(currentVideo);
         }
-
-        let currentCanvas = null;
-        for (const canvas of canvases) {
-          goog.asserts.assert(canvas.tagName.toLowerCase() == 'canvas',
-              'Should be a canvas element!');
-          if (canvas.parentElement == container) {
-            currentCanvas = canvas;
-            break;
-          }
-        }
-        if (!currentCanvas) {
-          currentCanvas = document.createElement('canvas');
-          currentCanvas.classList.add('shaka-canvas-container');
-          container.appendChild(currentCanvas);
-        }
-
+        const {lcevcCanvas, vrCanvas} =
+            shaka.ui.Overlay.findOrMakeSpecialCanvases_(
+                container, canvases, vrCanvases);
         try {
           // eslint-disable-next-line no-await-in-loop
           await shaka.ui.Overlay.setupUIandAutoLoad_(
-              container, currentVideo, currentCanvas);
+              container, currentVideo, lcevcCanvas, vrCanvas);
         } catch (e) {
           // This can fail if, for example, not every player file has loaded.
           // Ad-block is a likely cause for this sort of failure.
@@ -412,19 +414,20 @@ shaka.ui.Overlay = class {
   /**
    * @param {!Element} container
    * @param {!Element} video
-   * @param {!Element} canvas
+   * @param {!Element} lcevcCanvas
+   * @param {!Element} vrCanvas
    * @private
    */
-  static async setupUIandAutoLoad_(container, video, canvas) {
+  static async setupUIandAutoLoad_(container, video, lcevcCanvas, vrCanvas) {
     // Create the UI
-    const player = new shaka.Player(
-        shaka.util.Dom.asHTMLMediaElement(video));
+    const player = new shaka.Player();
     const ui = new shaka.ui.Overlay(player,
         shaka.util.Dom.asHTMLElement(container),
-        shaka.util.Dom.asHTMLMediaElement(video));
+        shaka.util.Dom.asHTMLMediaElement(video),
+        shaka.util.Dom.asHTMLCanvasElement(vrCanvas));
 
     // Attach Canvas used for LCEVC Decoding
-    player.attachCanvas(/** @type {HTMLCanvasElement} */(canvas));
+    player.attachCanvas(/** @type {HTMLCanvasElement} */(lcevcCanvas));
 
     // Get and configure cast app id.
     let castAppId = '';
@@ -481,6 +484,51 @@ shaka.ui.Overlay = class {
         shaka.log.error('Error auto-loading asset', e);
       }
     }
+
+    await player.attach(shaka.util.Dom.asHTMLMediaElement(video));
+  }
+
+
+  /**
+   * @param {!Element} container
+   * @param {!NodeList.<!Element>} canvases
+   * @param {!NodeList.<!Element>} vrCanvases
+   * @return {{lcevcCanvas: !Element, vrCanvas: !Element}}
+   * @private
+   */
+  static findOrMakeSpecialCanvases_(container, canvases, vrCanvases) {
+    let lcevcCanvas = null;
+    for (const canvas of canvases) {
+      goog.asserts.assert(canvas.tagName.toLowerCase() == 'canvas',
+          'Should be a canvas element!');
+      if (canvas.parentElement == container) {
+        lcevcCanvas = canvas;
+        break;
+      }
+    }
+    if (!lcevcCanvas) {
+      lcevcCanvas = document.createElement('canvas');
+      lcevcCanvas.classList.add('shaka-canvas-container');
+      container.appendChild(lcevcCanvas);
+    }
+    let vrCanvas = null;
+    for (const canvas of vrCanvases) {
+      goog.asserts.assert(canvas.tagName.toLowerCase() == 'canvas',
+          'Should be a canvas element!');
+      if (canvas.parentElement == container) {
+        vrCanvas = canvas;
+        break;
+      }
+    }
+    if (!vrCanvas) {
+      vrCanvas = document.createElement('canvas');
+      vrCanvas.classList.add('shaka-vr-canvas-container');
+      container.appendChild(vrCanvas);
+    }
+    return {
+      lcevcCanvas,
+      vrCanvas,
+    };
   }
 };
 

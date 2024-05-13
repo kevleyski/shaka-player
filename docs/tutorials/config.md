@@ -64,6 +64,8 @@ player.getConfiguration();
      playRangeEnd: Infinity
      playRangeStart: 0
      preferredAudioLanguage: ""
+     preferredAudioLabel: ""
+     preferredVideoLabel: ""
      preferredTextLanguage: ""
      restrictions: Object
      streaming: Object
@@ -77,6 +79,7 @@ player.getConfiguration();
        retryParameters: Object
        startAtSegmentBoundary: false
        safeSeekOffset: 5
+       segmentPrefetchLimit: 0
      textDisplayFactory: Function
 
 
@@ -120,19 +123,43 @@ buffering settings) while some will not have any effect until the next call to
 #### Low latency streaming
 
 With `.streaming.lowLatencyMode` set to true,
-`.streaming.inaccurateManifestTolerance` is set to 0 by default, and
-`.streaming.rebufferingGoal` is set to 0.01 by default.
+`.streaming.inaccurateManifestTolerance` is set to 0 by default,
+`.streaming.rebufferingGoal` is set to 0.01 by default,
+`.streaming.segmentPrefetchLimit` is set to 2 by default,
+`.streaming.updateIntervalSeconds` is set to 0.1 by default,
+`.streaming.retryParameters.baseDelay` is set to 100 by default,
+`.manifest.dash.autoCorrectDrift` is set to false by default,
+`.manifest.retryParameters.baseDelay` is set to 100 by default, and
+`.drm.retryParameters.baseDelay` is set to 100 by default.
 
-To customize the values of inaccurateManifestTolerance and rebufferingGoal
-with low latency mode, you can set the fields in the same or subsequent
-call to configure().
+To customize the values of inaccurateManifestTolerance, rebufferingGoal,
+segmentPrefetchLimit, updateIntervalSeconds and baseDelay with low latency
+mode, you can set the fields in the same or subsequent call to configure().
 ```js
 player.configure({
   streaming: {
     lowLatencyMode: true,
     inaccurateManifestTolerance: 0,
     rebufferingGoal: 0.01,
-  }
+    segmentPrefetchLimit: 2,
+    updateIntervalSeconds: 0.1,
+    retryParameters: {
+      baseDelay: 100,
+    },
+  },
+  manifest: {
+    dash: {
+      autoCorrectDrift: true,
+    },
+    retryParameters: {
+      baseDelay: 100,
+    },
+  },
+  drm: {
+    retryParameters: {
+      baseDelay: 100,
+    },
+  },
 });
 
 ```
@@ -142,8 +169,3 @@ player.configure({
 
 For more detail on individual configuration options, please see the API docs for
 {@link shaka.extern.PlayerConfiguration} and {@link shaka.Player#configure}.
-
-
-#### Continue the Tutorials
-
-Next, check out {@tutorial network-and-buffering-config}.

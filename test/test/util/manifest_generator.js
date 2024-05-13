@@ -97,6 +97,13 @@ shaka.test.ManifestGenerator.Manifest = class {
     this.minBufferTime = 0;
     /** @type {boolean} */
     this.sequenceMode = false;
+    /** @type {boolean} */
+    this.ignoreManifestTimestampsInSegmentsMode = false;
+    /** @type {string} */
+    this.type = 'UNKNOWN';
+    /** @type {?shaka.extern.ServiceDescription} */
+    this.serviceDescription = null;
+
 
     /** @type {shaka.extern.Manifest} */
     const foo = this;
@@ -263,6 +270,8 @@ shaka.test.ManifestGenerator.Variant = class {
     if (!isPartial) {
       /** @type {string} */
       this.language = 'und';
+      /** @type {string} */
+      this.label = '';
       /** @type {number} */
       this.bandwidth = 0;
       /** @type {number} */
@@ -316,7 +325,7 @@ shaka.test.ManifestGenerator.Variant = class {
     const ContentType = shaka.util.ManifestParserUtils.ContentType;
     const stream = new shaka.test.ManifestGenerator.Stream(
         this.manifest_, /* isPartial= */ false, id, ContentType.AUDIO,
-        this.language);
+        this.language, this.label);
     if (func) {
       func(stream);
     }
@@ -382,6 +391,8 @@ shaka.test.ManifestGenerator.DrmInfo = class {
     /** @type {string} */
     this.keySystem = keySystem;
     /** @type {string} */
+    this.encryptionScheme = '';
+    /** @type {string} */
     this.licenseServerUri = '';
     /** @type {boolean} */
     this.distinctiveIdentifierRequired = false;
@@ -438,6 +449,20 @@ shaka.test.ManifestGenerator.DrmInfo = class {
     const buffer = shaka.util.Uint8ArrayUtils.fromBase64(base64);
     this.initData.push({initData: buffer, initDataType: 'cenc'});
   }
+
+  /**
+   * Adds a new 'keyids' init data to the current DRM info.
+   *
+   * @param {string} base64
+   */
+  addKeyIdsData(base64) {
+    if (!this.initData) {
+      this.initData = [];
+    }
+
+    const buffer = shaka.util.Uint8ArrayUtils.fromBase64(base64);
+    this.initData.push({initData: buffer, initDataType: 'keyids'});
+  }
 };
 
 shaka.test.ManifestGenerator.Stream = class {
@@ -446,12 +471,15 @@ shaka.test.ManifestGenerator.Stream = class {
    * @param {boolean} isPartial
    * @param {?number} id
    * @param {shaka.util.ManifestParserUtils.ContentType} type
-   * @param {string=} lang
+   * @param {?string=} lang
+   * @param {string=} label
    */
-  constructor(manifest, isPartial, id, type, lang) {
-    goog.asserts.assert(
-        !manifest || !manifest.isIdUsed_(id),
-        'Streams should have unique ids!');
+  constructor(manifest, isPartial, id, type, lang, label) {
+    // variants can be made up of different combinations of video
+    // and audio streams
+    // goog.asserts.assert(
+    //     !manifest || !manifest.isIdUsed_(id),
+    //     'Streams should have unique ids!');
     const ContentType = shaka.util.ManifestParserUtils.ContentType;
 
     /** @const {shaka.test.ManifestGenerator.Manifest} */
@@ -467,28 +495,31 @@ shaka.test.ManifestGenerator.Stream = class {
       this.id = id;
     }
 
-    if (!isPartial) {
-      let defaultMimeType = 'text/plain';
-      let defaultCodecs = '';
-      if (type == ContentType.AUDIO) {
-        defaultMimeType = 'audio/mp4';
-        defaultCodecs = 'mp4a.40.2';
-      } else if (type == ContentType.VIDEO) {
-        defaultMimeType = 'video/mp4';
-        defaultCodecs = 'avc1.4d401f';
-      } else if (type == ContentType.TEXT) {
-        defaultMimeType = 'text/vtt';
-      }
+    let defaultMimeType = 'text/plain';
+    let defaultCodecs = '';
+    if (type == ContentType.AUDIO) {
+      defaultMimeType = 'audio/mp4';
+      defaultCodecs = 'mp4a.40.2';
+    } else if (type == ContentType.VIDEO) {
+      defaultMimeType = 'video/mp4';
+      defaultCodecs = 'avc1.4d401f';
+    } else if (type == ContentType.TEXT) {
+      defaultMimeType = 'text/vtt';
+    }
 
+    if (!isPartial) {
       const create =
           jasmine.createSpy('createSegmentIndex').and.callFake(() => {
             return Promise.resolve();
           });
       const shaka_ = manifest ? manifest.shaka_ : shaka;
-      const segmentIndex = new shaka_.media.SegmentIndex([]);
+      const segmentIndex = shaka_.media.SegmentIndex.forSingleSegment(
+          /* startTime= */ 0, /* duration= */ 10, ['testUri']);
 
       /** @type {?string} */
       this.originalId = null;
+      /** @type {?string} */
+      this.groupId = null;
       /** @type {shaka.extern.CreateSegmentIndexFunction} */
       this.createSegmentIndex = shaka.test.Util.spyFunc(create);
       /** @type {shaka.media.SegmentIndex} */
@@ -516,9 +547,11 @@ shaka.test.ManifestGenerator.Stream = class {
       /** @type {!Set.<string>} */
       this.keyIds = new Set();
       /** @type {string} */
-      this.language = lang || 'und';
+      this.language = shaka.util.LanguageUtils.normalize(lang || 'und');
       /** @type {?string} */
-      this.label = null;
+      this.originalLanguage = lang || null;
+      /** @type {?string} */
+      this.label = label || null;
       /** @type {boolean} */
       this.primary = false;
       /** @type {?shaka.extern.Stream} */
@@ -540,8 +573,19 @@ shaka.test.ManifestGenerator.Stream = class {
       /** @type {(string|undefined)} */
       this.hdr = undefined;
       /** @type {(string|undefined)} */
+      this.videoLayout = undefined;
+      /** @type {(string|undefined)} */
       this.tilesLayout = undefined;
+      /** @type {?shaka.media.ManifestParser.AccessibilityPurpose} */
+      this.accessibilityPurpose;
+      /** @type {boolean} */
+      this.external = false;
+      /** @type {boolean} */
+      this.fastSwitching = false;
     }
+    /** @type {!Set.<string>} */
+    this.fullMimeTypes = new Set([shaka.util.MimeUtils.getFullType(
+        defaultMimeType, defaultCodecs)]);
 
     /** @type {shaka.extern.Stream} */
     const foo = this;
@@ -668,6 +712,8 @@ shaka.test.ManifestGenerator.Stream = class {
   mime(mime, codecs) {
     this.mimeType = mime;
     this.codecs = codecs || '';
+    this.fullMimeTypes = new Set([shaka.util.MimeUtils.getFullType(
+        this.mimeType, this.codecs)]);
   }
 
   /**

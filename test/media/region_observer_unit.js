@@ -31,7 +31,8 @@ describe('RegionObserver', () => {
     timeline = new shaka.media.RegionTimeline(
         shaka.test.Util.spyFunc(onSeekRange));
 
-    observer = new shaka.media.RegionObserver(timeline);
+    observer = new shaka.media.RegionObserver(
+        timeline, /* startsPastZero= */ false);
     observer.addEventListener('enter', (event) => {
       shaka.test.Util.spyFunc(onEnterRegion)(event['region'], event['seeking']);
     });
@@ -357,6 +358,7 @@ describe('RegionObserver', () => {
       startTime: startTimeSeconds,
       endTime: endTimeSeconds,
       eventElement: null,
+      eventNode: null,
     };
   }
 

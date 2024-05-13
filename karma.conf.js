@@ -7,15 +7,43 @@
 // Karma configuration
 // Install required modules by running "npm install"
 
-const Jimp = require('jimp');
+// lodash is an indirect dependency, depended on by Karma
+const _ = require('lodash');
 const fs = require('fs');
 const glob = require('glob');
+const Jimp = require('jimp');
 const path = require('path');
 const rimraf = require('rimraf');
 const {ssim} = require('ssim.js');
 const util = require('karma/common/util');
 const which = require('which');
 const yaml = require('js-yaml');
+
+/**
+ * Like Object.assign, but recursive and doesn't clobber objects and arrays.
+ * If two arrays are merged, they are concatenated.
+ * Ex:
+ *   mergeConfigs({ foo: 'bar', args: [1, 2, 3] },
+ *                { baz: 'blah', args: [4, 5, 6] })
+ *       => { foo: 'bar', baz: 'blah', args: [1, 2, 3, 4, 5, 6] }
+ *
+ * @param {Object} first
+ * @param {Object} second
+ * @return {Object}
+ */
+function mergeConfigs(first, second) {
+  return _.mergeWith(
+      first,
+      second,
+      (firstValue, secondValue) => {
+        // Merge arrays by concatenation.
+        if (Array.isArray(firstValue)) {
+          return firstValue.concat(secondValue);
+        }
+        // Use lodash's default merge behavior for everything else.
+        return undefined;
+      });
+}
 
 /**
  * @param {Object} config
@@ -78,7 +106,7 @@ module.exports = (config) => {
       }
 
       // Add standard WebDriver configs.
-      Object.assign(launcher, {
+      mergeConfigs(launcher, {
         base: 'WebDriver',
         config: {hostname: gridHostname, port: gridPort},
         pseudoActivityInterval: 20000,
@@ -87,8 +115,10 @@ module.exports = (config) => {
         version: metadata.version,
       });
 
-      if (metadata.extra_config) {
-        Object.assign(launcher, metadata.extra_config);
+      if (metadata.extra_configs) {
+        for (const config of metadata.extra_configs) {
+          mergeConfigs(launcher, config);
+        }
       }
     }
 
@@ -136,19 +166,31 @@ module.exports = (config) => {
       'jasmine',
     ],
 
-    // An expressjs middleware, essentially a component that handles requests
-    // in Karma's webserver.  This one is custom, and will let us take
-    // screenshots of browsers connected through WebDriver.
-    middleware: ['webdriver-screenshot'],
+    middleware: [
+      // An expressjs middleware, essentially a component that handles requests
+      // in Karma's webserver.  This one is custom, and will let us take
+      // screenshots of browsers connected through WebDriver.
+      'webdriver-screenshot',
+
+      // A "middleware" that lets us hook and augment the reporters with
+      // additional information.
+      'augment-reporters',
+    ],
 
     plugins: [
       'karma-*',  // default plugins
       '@*/karma-*', // default scoped plugins
 
-      // An inline plugin which supplies the webdriver-screenshot middleware.
       {
+        // An inline plugin which supplies the webdriver-screenshot middleware.
         'middleware:webdriver-screenshot': [
           'factory', WebDriverScreenshotMiddlewareFactory,
+        ],
+
+        // An inline plugin which augments the Reporter to add additional
+        // information.
+        'middleware:augment-reporters': [
+          'factory', AugmentReportersFactory,
         ],
       },
     ],
@@ -161,8 +203,8 @@ module.exports = (config) => {
       //   Babel polyfill, required for async/await
       'node_modules/@babel/polyfill/dist/polyfill.js',
 
-      // muxjs module next
-      'node_modules/mux.js/dist/mux.min.js',
+      // codem-isoboxer module next
+      'node_modules/codem-isoboxer/dist/iso_boxer.min.js',
 
       // EME encryption scheme polyfill, compiled into Shaka Player, but outside
       // of the Closure deps system, so not in shaka-player.uncompiled.js.  This
@@ -188,6 +230,9 @@ module.exports = (config) => {
       // test utilities next, which fill in that namespace
       'test/test/util/*.js',
 
+      // Proxy cast.__platform__ methods across frames, necessary in testing
+      'proxy-cast-platform.js',
+
       // bootstrapping for the test suite last; this will load the actual tests
       'test/test/boot.js',
 
@@ -203,7 +248,33 @@ module.exports = (config) => {
       {pattern: 'third_party/**/*.js', included: false},
       {pattern: 'test/**/*.js', included: false},
       {pattern: 'test/test/assets/*', included: false},
+      {pattern: 'test/test/assets/dash-multi-codec/*', included: false},
+      {pattern: 'test/test/assets/dash-multi-codec-ec3/*', included: false},
       {pattern: 'test/test/assets/3675/*', included: false},
+      {pattern: 'test/test/assets/6339/*', included: false},
+      {pattern: 'test/test/assets/dash-aes-128/*', included: false},
+      {pattern: 'test/test/assets/dash-vr/*', included: false},
+      {pattern: 'test/test/assets/hls-aes-256/*', included: false},
+      {pattern: 'test/test/assets/hls-raw-aac/*', included: false},
+      {pattern: 'test/test/assets/hls-raw-ac3/*', included: false},
+      {pattern: 'test/test/assets/hls-raw-ec3/*', included: false},
+      {pattern: 'test/test/assets/hls-raw-mp3/*', included: false},
+      {pattern: 'test/test/assets/hls-sample-aes/*', included: false},
+      {pattern: 'test/test/assets/hls-text-offset/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-aac/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-ac3/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-ec3/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-h264/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-h265/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-mp3/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-muxed-aac-h264/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-muxed-aac-h265/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-muxed-ac3-h264/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-muxed-mp3-h264/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-muxed-ec3-h264/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-muxed-opus-h264/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-raw-aac/*', included: false},
+      {pattern: 'test/test/assets/hls-ts-rollover/*', included: false},
       {pattern: 'dist/shaka-player.ui.js', included: false},
       {pattern: 'dist/locales.js', included: false},
       {pattern: 'demo/**/*.js', included: false},
@@ -318,9 +389,12 @@ module.exports = (config) => {
         'ui/**/*.js': ['babel', 'sourcemap'],
         'test/**/*.js': ['babel', 'sourcemap'],
         'third_party/**/*.js': ['babel', 'sourcemap'],
+        'proxy-cast-platform.js': ['babel', 'sourcemap'],
       },
 
       babelPreprocessor: {
+        // Cache results in .babel-cache
+        cachePath: '.babel-cache',
         options: {
           presets: ['@babel/preset-env'],
           // Add source maps so that backtraces refer to the original code.
@@ -603,15 +677,27 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
   }
 
   /**
+   * @param {karma.Launcher.Browser.spec} spec
    * @param {wd.remote} webDriverClient A WebDriver client, an object from the
    *   "wd" package, created by "wd.remote()".
    * @return {!Promise.<!Buffer>} A Buffer containing a PNG screenshot
    */
-  function getScreenshot(webDriverClient) {
+  function getScreenshot(spec, webDriverClient) {
     return new Promise((resolve, reject) => {
       webDriverClient.takeScreenshot((error, pngBase64) => {
         if (error) {
           reject(error);
+        } else if (pngBase64.error) {
+          // In some failure cases, pngBase64 is an object with "error",
+          // "message", and "stacktrace" fields.  This happens, for example,
+          // with a timeout from the screenshot command.  This is not an
+          // expected situation, so log it.  The extra newlines keep this from
+          // being overwritten on the terminal when running tests against many
+          // browsers at once.
+          console.log('\n\nUnexpected screenshot failure:\n' +
+              `  Error: ${JSON.stringify(pngBase64)}\n` +
+              `  WebDriver spec: ${JSON.stringify(spec)}\n\n\n`);
+          reject(pngBase64);
         } else {
           // Convert the screenshot to a binary buffer.
           resolve(Buffer.from(pngBase64, 'base64'));
@@ -635,7 +721,8 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
     }
 
     /** @type {!Buffer} */
-    const fullPageScreenshotData = await getScreenshot(webDriverClient);
+    const fullPageScreenshotData =
+        await getScreenshot(browser.spec, webDriverClient);
 
     // Crop the screenshot to the dimensions specified in the test.
     // Jimp is picky about types, so convert these strings to numbers.
@@ -754,7 +841,7 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
         // The result is cached for the sake of performance.
         if (webDriverClient.canTakeScreenshot === undefined) {
           try {
-            await getScreenshot(webDriverClient);
+            await getScreenshot(browser.spec, webDriverClient);
             webDriverClient.canTakeScreenshot = true;
           } catch (error) {
             webDriverClient.canTakeScreenshot = false;
@@ -815,3 +902,39 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
   }
 }
 WebDriverScreenshotMiddlewareFactory.$inject = ['launcher'];
+
+/**
+ * This is a factory for a "middleware" component that handles requests in
+ * Karma's webserver.  We don't handle any actual requests here, but we use this
+ * plugin to get access to the reporters through dependency injection and
+ * augment them to display the number of tests left to be processed.
+ *
+ * This is useful when running tests locally on many browsers, since you can
+ * see more clearly which browsers are still working and which are done.
+ *
+ * This could have been done through a fork of Karma itself, but this plugin
+ * was clearer in some ways than using a fork of a now-extinct project.
+ *
+ * @param {karma.Launcher} launcher
+ * @return {karma.Middleware}
+ */
+function AugmentReportersFactory(reporters) {
+  // Augment each reporter in the list.
+  for (const reporter of reporters) {
+    // Shim the renderBrowser function to add the number of test cases not yet
+    // processed (passed, failed, or skipped).
+    // The source we are patching: https://github.com/karma-runner/karma/blob/d8cf806e/lib/reporters/base.js#L37
+    const orig = reporter.renderBrowser;
+    reporter.renderBrowser = (browser) => {
+      const results = browser.lastResult;
+      const processed = results.success + results.failed + results.skipped;
+      const left = results.total - processed;
+      return orig(browser) + ` (${left} left)`;
+    };
+  }
+
+  // Return a dummy middleware that does nothing and chains to the next
+  // middleware.
+  return (request, response, next) => next();
+}
+AugmentReportersFactory.$inject = ['reporter._reporters'];

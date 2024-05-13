@@ -94,16 +94,29 @@ shaka.extern.ManifestParser = class {
    * @exportDoc
    */
   onExpirationUpdated(sessionId, expiration) {}
+
+  /**
+   * Tells the parser that the initial variant has been chosen.
+   *
+   * @param {shaka.extern.Variant} variant
+   * @exportDoc
+   */
+  onInitialVariantChosen(variant) {}
+
+  /**
+   * Tells the parser that a location should be banned. This is called on
+   * retry.
+   *
+   * @param {string} uri
+   * @exportDoc
+   */
+  banLocation(uri) {}
 };
 
 
 /**
  * @typedef {{
  *   networkingEngine: !shaka.net.NetworkingEngine,
- *   modifyManifestRequest: function(!shaka.extern.Request,
- *      shaka.util.CmcdManager.ManifestInfo),
- *   modifySegmentRequest: function(!shaka.extern.Request,
- *      shaka.util.CmcdManager.SegmentInfo),
  *   filter: function(shaka.extern.Manifest):!Promise,
  *   makeTextStreamsForClosedCaptions: function(shaka.extern.Manifest),
  *   onTimelineRegionAdded: function(shaka.extern.TimelineRegionInfo),
@@ -111,7 +124,11 @@ shaka.extern.ManifestParser = class {
  *   onError: function(!shaka.util.Error),
  *   isLowLatencyMode: function():boolean,
  *   isAutoLowLatencyMode: function():boolean,
- *   enableLowLatencyMode: function()
+ *   enableLowLatencyMode: function(),
+ *   updateDuration: function(),
+ *   newDrmInfo: function(shaka.extern.Stream),
+ *   onManifestUpdated: function(),
+ *   getBandwidthEstimate: function():number
  * }}
  *
  * @description
@@ -122,12 +139,6 @@ shaka.extern.ManifestParser = class {
  *
  * @property {!shaka.net.NetworkingEngine} networkingEngine
  *   The networking engine to use for network requests.
- * @property {function(!shaka.extern.Request,
- *    shaka.util.CmcdManager.ManifestInfo)} modifyManifestRequest
- *   Modify a manifest request
- * @property {function(!shaka.extern.Request,
- *   shaka.util.CmcdManager.SegmentInfo)} modifySegmentRequest
- *   Modify a segment request
  * @property {function(shaka.extern.Manifest):!Promise} filter
  *   Should be called when new variants or text streams are added to the
  *   Manifest.  Note that this operation is asynchronous.
@@ -147,6 +158,15 @@ shaka.extern.ManifestParser = class {
  *   Return true if auto low latency streaming mode is enabled.
  * @property {function()} enableLowLatencyMode
  *   Enable low latency streaming mode.
+ * @property {function()} updateDuration
+ *   Update the presentation duration based on PresentationTimeline.
+ * @property {function(shaka.extern.Stream)} newDrmInfo
+ *   Inform the player of new DRM info that needs to be processed for the given
+ *   stream.
+ * @property {function()} onManifestUpdated
+ *   Should be called when the manifest is updated.
+ * @property {function():number} getBandwidthEstimate
+ *   Get the estimated bandwidth in bits per second.
  * @exportDoc
  */
 shaka.extern.ManifestParser.PlayerInterface;

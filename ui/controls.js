@@ -16,10 +16,13 @@ goog.require('shaka.ui.AdCounter');
 goog.require('shaka.ui.AdPosition');
 goog.require('shaka.ui.BigPlayButton');
 goog.require('shaka.ui.ContextMenu');
+goog.require('shaka.ui.HiddenFastForwardButton');
+goog.require('shaka.ui.HiddenRewindButton');
 goog.require('shaka.ui.Locales');
 goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.SeekBar');
 goog.require('shaka.ui.Utils');
+goog.require('shaka.ui.VRManager');
 goog.require('shaka.util.Dom');
 goog.require('shaka.util.EventManager');
 goog.require('shaka.util.FakeEvent');
@@ -40,9 +43,10 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
    * @param {!shaka.Player} player
    * @param {!HTMLElement} videoContainer
    * @param {!HTMLMediaElement} video
+   * @param {?HTMLCanvasElement} vrCanvas
    * @param {shaka.extern.UIConfiguration} config
    */
-  constructor(player, videoContainer, video, config) {
+  constructor(player, videoContainer, video, vrCanvas, config) {
     super();
 
     /** @private {boolean} */
@@ -73,6 +77,9 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
 
     /** @private {!HTMLElement} */
     this.videoContainer_ = videoContainer;
+
+    /** @private {?HTMLCanvasElement} */
+    this.vrCanvas_ = vrCanvas;
 
     /** @private {shaka.extern.IAdManager} */
     this.adManager_ = this.player_.getAdManager();
@@ -167,6 +174,9 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     /** @private {shaka.util.EventManager} */
     this.eventManager_ = new shaka.util.EventManager();
 
+    /** @private {?shaka.ui.VRManager} */
+    this.vr_ = null;
+
     // Configure and create the layout of the controls
     this.configure(this.config_);
     this.addEventListeners_();
@@ -185,7 +195,7 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     this.onCastStatusChange_();
 
     // Start this timer after we are finished initializing everything,
-    this.timeAndSeekRangeTimer_.tickEvery(/* seconds= */ 0.125);
+    this.timeAndSeekRangeTimer_.tickEvery(this.config_.refreshTickInSeconds);
 
     this.eventManager_.listen(this.localization_,
         shaka.ui.Localization.LOCALE_CHANGED, (e) => {
@@ -226,6 +236,11 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     if (this.timeAndSeekRangeTimer_) {
       this.timeAndSeekRangeTimer_.stop();
       this.timeAndSeekRangeTimer_ = null;
+    }
+
+    if (this.vr_) {
+      this.vr_.release();
+      this.vr_ = null;
     }
 
     // Important!  Release all child elements before destroying the cast proxy
@@ -332,6 +347,10 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       this.contextMenu_ = null;
     }
 
+    if (this.vr_) {
+      this.vr_.configure(config);
+    }
+
     if (this.controlsContainer_) {
       shaka.util.Dom.removeAllChildren(this.controlsContainer_);
       this.releaseChildElements_();
@@ -341,6 +360,13 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       // re-created or uprooted in the DOM, even when the DOM is re-created,
       // since that seemingly breaks the IMA SDK.
       this.addClientAdContainer_();
+
+      goog.asserts.assert(
+          this.controlsContainer_, 'Should have a controlsContainer_!');
+      goog.asserts.assert(this.localVideo_, 'Should have a localVideo_!');
+      goog.asserts.assert(this.player_, 'Should have a player_!');
+      this.vr_ = new shaka.ui.VRManager(this.controlsContainer_, this.vrCanvas_,
+          this.localVideo_, this.player_, this.config_);
     }
 
     // Create the new layout
@@ -587,47 +613,190 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     return false;
   }
 
-  /** @export */
-  async toggleFullScreen() {
-    if (document.fullscreenEnabled) {
-      if (document.fullscreenElement) {
-        if (screen.orientation) {
-          screen.orientation.unlock();
+  /** @private */
+  async enterFullScreen_() {
+    try {
+      if (document.fullscreenEnabled) {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
         }
-        await document.exitFullscreen();
+        const fullScreenElement = this.config_.fullScreenElement;
+        await fullScreenElement.requestFullscreen({navigationUI: 'hide'});
+
+        if (this.config_.forceLandscapeOnFullscreen && screen.orientation) {
+          // Locking to 'landscape' should let it be either
+          // 'landscape-primary' or 'landscape-secondary' as appropriate.
+          // We ignore errors from this specific call, since it creates noise
+          // on desktop otherwise.
+          try {
+            await screen.orientation.lock('landscape');
+          } catch (error) {}
+        }
       } else {
-        // If we are in PiP mode, leave PiP mode first.
-        try {
-          if (document.pictureInPictureElement) {
-            await document.exitPictureInPicture();
-          }
-          await this.videoContainer_.requestFullscreen({navigationUI: 'hide'});
-          if (this.config_.forceLandscapeOnFullscreen && screen.orientation) {
-            try {
-              // Locking to 'landscape' should let it be either
-              // 'landscape-primary' or 'landscape-secondary' as appropriate.
-              await screen.orientation.lock('landscape');
-            } catch (error) {
-              // If screen.orientation.lock does not work on a device, it will
-              // be rejected with an error. Suppress that error.
-            }
-          }
-        } catch (error) {
-          this.dispatchEvent(new shaka.util.FakeEvent(
-              'error', (new Map()).set('detail', error)));
-        }
-      }
-    } else {
-      const video = /** @type {HTMLVideoElement} */(this.localVideo_);
-      if (video.webkitSupportsFullscreen) {
-        if (video.webkitDisplayingFullscreen) {
-          video.webkitExitFullscreen();
-        } else {
+        const video = /** @type {HTMLVideoElement} */(this.localVideo_);
+        if (video.webkitSupportsFullscreen) {
           video.webkitEnterFullscreen();
         }
       }
+    } catch (error) {
+      // Entering fullscreen can fail without user interaction.
+      this.dispatchEvent(new shaka.util.FakeEvent(
+          'error', (new Map()).set('detail', error)));
     }
   }
+
+  /** @private */
+  async exitFullScreen_() {
+    if (document.fullscreenEnabled) {
+      if (screen.orientation) {
+        screen.orientation.unlock();
+      }
+      await document.exitFullscreen();
+    } else {
+      const video = /** @type {HTMLVideoElement} */(this.localVideo_);
+      if (video.webkitSupportsFullscreen) {
+        video.webkitExitFullscreen();
+      }
+    }
+  }
+
+  /** @export */
+  async toggleFullScreen() {
+    if (this.isFullScreenEnabled()) {
+      await this.exitFullScreen_();
+    } else {
+      await this.enterFullScreen_();
+    }
+  }
+
+  /**
+   * @return {boolean}
+   * @export
+   */
+  isPiPAllowed() {
+    if (this.castProxy_.isCasting()) {
+      return false;
+    }
+    if ('documentPictureInPicture' in window &&
+        this.config_.preferDocumentPictureInPicture) {
+      const video = /** @type {HTMLVideoElement} */(this.localVideo_);
+      return !video.disablePictureInPicture;
+    }
+    if (document.pictureInPictureEnabled) {
+      const video = /** @type {HTMLVideoElement} */(this.localVideo_);
+      return !video.disablePictureInPicture;
+    }
+    return false;
+  }
+
+  /**
+   * @return {boolean}
+   * @export
+   */
+  isPiPEnabled() {
+    if ('documentPictureInPicture' in window &&
+        this.config_.preferDocumentPictureInPicture) {
+      return !!window.documentPictureInPicture.window;
+    } else {
+      return !!document.pictureInPictureElement;
+    }
+  }
+
+  /** @export */
+  async togglePiP() {
+    try {
+      if ('documentPictureInPicture' in window &&
+        this.config_.preferDocumentPictureInPicture) {
+        await this.toggleDocumentPictureInPicture_();
+      } else if (!document.pictureInPictureElement) {
+        // If you were fullscreen, leave fullscreen first.
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        }
+        const video = /** @type {HTMLVideoElement} */(this.localVideo_);
+        await video.requestPictureInPicture();
+      } else {
+        await document.exitPictureInPicture();
+      }
+    } catch (error) {
+      this.dispatchEvent(new shaka.util.FakeEvent(
+          'error', (new Map()).set('detail', error)));
+    }
+  }
+
+  /**
+   * The Document Picture-in-Picture API makes it possible to open an
+   * always-on-top window that can be populated with arbitrary HTML content.
+   * https://developer.chrome.com/docs/web-platform/document-picture-in-picture
+   * @private
+   */
+  async toggleDocumentPictureInPicture_() {
+    // Close Picture-in-Picture window if any.
+    if (window.documentPictureInPicture.window) {
+      window.documentPictureInPicture.window.close();
+      return;
+    }
+
+    // Open a Picture-in-Picture window.
+    const pipPlayer = this.videoContainer_;
+    const rectPipPlayer = pipPlayer.getBoundingClientRect();
+    const pipWindow = await window.documentPictureInPicture.requestWindow({
+      width: rectPipPlayer.width,
+      height: rectPipPlayer.height,
+    });
+
+    // Copy style sheets to the Picture-in-Picture window.
+    this.copyStyleSheetsToWindow_(pipWindow);
+
+    // Add placeholder for the player.
+    const parentPlayer = pipPlayer.parentNode || document.body;
+    const placeholder = this.videoContainer_.cloneNode(true);
+    placeholder.style.visibility = 'hidden';
+    placeholder.style.height = getComputedStyle(pipPlayer).height;
+    parentPlayer.appendChild(placeholder);
+
+    // Make sure player fits in the Picture-in-Picture window.
+    const styles = document.createElement('style');
+    styles.append(`[data-shaka-player-container] {
+      width: 100% !important; max-height: 100%}`);
+    pipWindow.document.head.append(styles);
+
+    // Move player to the Picture-in-Picture window.
+    pipWindow.document.body.append(pipPlayer);
+
+    // Listen for the PiP closing event to move the player back.
+    this.eventManager_.listenOnce(pipWindow, 'pagehide', () => {
+      placeholder.replaceWith(/** @type {!Node} */(pipPlayer));
+    });
+  }
+
+  /** @private */
+  copyStyleSheetsToWindow_(win) {
+    const styleSheets = /** @type {!Iterable<*>} */(document.styleSheets);
+    const allCSS = [...styleSheets]
+        .map((sheet) => {
+          try {
+            return [...sheet.cssRules].map((rule) => rule.cssText).join('');
+          } catch (e) {
+            const link = /** @type {!HTMLLinkElement} */(
+              document.createElement('link'));
+
+            link.rel = 'stylesheet';
+            link.type = sheet.type;
+            link.media = sheet.media;
+            link.href = sheet.href;
+            win.document.head.appendChild(link);
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    const style = document.createElement('style');
+
+    style.textContent = allCSS;
+    win.document.head.appendChild(style);
+  }
+
 
   /** @export */
   showAdUI() {
@@ -706,6 +875,11 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
 
     if (!this.spinnerContainer_) {
       this.addBufferingSpinner_();
+    }
+
+    if (this.config_.seekOnTaps) {
+      this.addFastForwardButtonOnControlsContainer_();
+      this.addRewindButtonOnControlsContainer_();
     }
 
     this.addDaiAdContainer_();
@@ -829,6 +1003,42 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     spinnerCircle.setAttribute('stroke-width', '1');
     spinnerCircle.setAttribute('stroke-miterlimit', '10');
     svg.appendChild(spinnerCircle);
+  }
+
+  /**
+   * Add fast-forward button on Controls container for moving video some
+   * seconds ahead when the video is tapped more than once, video seeks ahead
+   * some seconds for every extra tap.
+   * @private
+   */
+  addFastForwardButtonOnControlsContainer_() {
+    const hiddenFastForwardContainer = shaka.util.Dom.createHTMLElement('div');
+    hiddenFastForwardContainer.classList.add(
+        'shaka-hidden-fast-forward-container');
+    this.controlsContainer_.appendChild(hiddenFastForwardContainer);
+
+    /** @private {shaka.ui.HiddenFastForwardButton} */
+    this.hiddenFastForwardButton_ =
+        new shaka.ui.HiddenFastForwardButton(hiddenFastForwardContainer, this);
+    this.elements_.push(this.hiddenFastForwardButton_);
+  }
+
+  /**
+   * Add Rewind button on Controls container for moving video some seconds
+   * behind when the video is tapped more than once, video seeks behind some
+   * seconds for every extra tap.
+   * @private
+   */
+  addRewindButtonOnControlsContainer_() {
+    const hiddenRewindContainer = shaka.util.Dom.createHTMLElement('div');
+    hiddenRewindContainer.classList.add(
+        'shaka-hidden-rewind-container');
+    this.controlsContainer_.appendChild(hiddenRewindContainer);
+
+    /** @private {shaka.ui.HiddenRewindButton} */
+    this.hiddenRewindButton_ =
+        new shaka.ui.HiddenRewindButton(hiddenRewindContainer, this);
+    this.elements_.push(this.hiddenRewindButton_);
   }
 
   /** @private */
@@ -986,6 +1196,10 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       this.onCastStatusChange_();
     });
 
+    this.eventManager_.listen(this.vr_, 'vrstatuschanged', () => {
+      this.dispatchEvent(new shaka.util.FakeEvent('vrstatuschanged'));
+    });
+
     this.eventManager_.listen(this.videoContainer_, 'keydown', (e) => {
       this.onControlsKeyDown_(/** @type {!KeyboardEvent} */(e));
     });
@@ -1011,13 +1225,6 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
         await this.onScreenRotation_();
       });
     }
-
-    this.eventManager_.listen(document, 'fullscreenchange', () => {
-      if (this.ad_) {
-        this.ad_.resize(
-            this.localVideo_.offsetWidth, this.localVideo_.offsetHeight);
-      }
-    });
   }
 
 
@@ -1031,14 +1238,17 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     if (!this.video_ ||
         this.video_.readyState == 0 ||
         this.castProxy_.isCasting() ||
-        !this.config_.enableFullscreenOnRotation) { return; }
+        !this.config_.enableFullscreenOnRotation ||
+        !this.isFullScreenSupported()) {
+      return;
+    }
 
     if (screen.orientation.type.includes('landscape') &&
-        !document.fullscreenElement) {
-      await this.videoContainer_.requestFullscreen({navigationUI: 'hide'});
+        !this.isFullScreenEnabled()) {
+      await this.enterFullScreen_();
     } else if (screen.orientation.type.includes('portrait') &&
-        document.fullscreenElement) {
-      await document.exitFullscreen();
+      this.isFullScreenEnabled()) {
+      await this.exitFullScreen_();
     }
   }
 
@@ -1196,13 +1406,13 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       // The controls are hidden, so show them.
       this.onMouseMove_(event);
       // Stop this event from becoming a click event.
-      event.preventDefault();
+      event.cancelable && event.preventDefault();
     }
   }
 
   /** @private */
   onContainerClick_() {
-    if (!this.enabled_) {
+    if (!this.enabled_ || this.isPlayingVR()) {
       return;
     }
 
@@ -1261,12 +1471,14 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
     }
 
     const keyboardSeekDistance = this.config_.keyboardSeekDistance;
+    const keyboardLargeSeekDistance = this.config_.keyboardLargeSeekDistance;
 
     switch (event.key) {
       case 'ArrowLeft':
         // If it's not focused on the volume bar, move the seek time backward
         // for a few sec. Otherwise, the volume will be adjusted automatically.
-        if (this.seekBar_ && !isVolumeBar && keyboardSeekDistance > 0) {
+        if (this.seekBar_ && isSeekBar && !isVolumeBar &&
+            keyboardSeekDistance > 0) {
           event.preventDefault();
           this.seek_(this.seekBar_.getValue() - keyboardSeekDistance);
         }
@@ -1274,9 +1486,26 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       case 'ArrowRight':
         // If it's not focused on the volume bar, move the seek time forward
         // for a few sec. Otherwise, the volume will be adjusted automatically.
-        if (this.seekBar_ && !isVolumeBar && keyboardSeekDistance > 0) {
+        if (this.seekBar_ && isSeekBar && !isVolumeBar &&
+            keyboardSeekDistance > 0) {
           event.preventDefault();
           this.seek_(this.seekBar_.getValue() + keyboardSeekDistance);
+        }
+        break;
+      case 'PageDown':
+        // PageDown is like ArrowLeft, but has a larger jump distance, and does
+        // nothing to volume.
+        if (this.seekBar_ && isSeekBar && keyboardSeekDistance > 0) {
+          event.preventDefault();
+          this.seek_(this.seekBar_.getValue() - keyboardLargeSeekDistance);
+        }
+        break;
+      case 'PageUp':
+        // PageDown is like ArrowRight, but has a larger jump distance, and does
+        // nothing to volume.
+        if (this.seekBar_ && isSeekBar && keyboardSeekDistance > 0) {
+          event.preventDefault();
+          this.seek_(this.seekBar_.getValue() + keyboardLargeSeekDistance);
         }
         break;
       // Jump to the beginning of the video's seek range.
@@ -1289,6 +1518,23 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
       case 'End':
         if (this.seekBar_) {
           this.seek_(this.player_.seekRange().end);
+        }
+        break;
+      case 'f':
+        if (this.isFullScreenSupported()) {
+          this.toggleFullScreen();
+        }
+        break;
+      case 'm':
+        if (this.ad_ && this.ad_.isLinear()) {
+          this.ad_.setMuted(!this.ad_.isMuted());
+        } else {
+          this.localVideo_.muted = !this.localVideo_.muted;
+        }
+        break;
+      case 'p':
+        if (this.isPiPAllowed()) {
+          this.togglePiP();
         }
         break;
       // Pause or play by pressing space on the seek bar.
@@ -1485,6 +1731,149 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
   }
 
   /**
+   * @export
+   */
+  showUI() {
+    const event = new Event('mousemove', {bubbles: false, cancelable: false});
+    this.onMouseMove_(event);
+  }
+
+  /**
+   * @export
+   */
+  hideUI() {
+    this.onMouseLeave_();
+  }
+
+  /**
+   * @return {shaka.ui.VRManager}
+   */
+  getVR() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    return this.vr_;
+  }
+
+  /**
+   * Returns if a VR is capable.
+   *
+   * @return {boolean}
+   * @export
+   */
+  canPlayVR() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    return this.vr_.canPlayVR();
+  }
+
+  /**
+   * Returns if a VR is supported.
+   *
+   * @return {boolean}
+   * @export
+   */
+  isPlayingVR() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    return this.vr_.isPlayingVR();
+  }
+
+  /**
+   * Reset VR view.
+   */
+  resetVR() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    this.vr_.reset();
+  }
+
+  /**
+   * Get the angle of the north.
+   *
+   * @return {?number}
+   * @export
+   */
+  getVRNorth() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    return this.vr_.getNorth();
+  }
+
+  /**
+   * Returns the angle of the current field of view displayed in degrees.
+   *
+   * @return {?number}
+   * @export
+   */
+  getVRFieldOfView() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    return this.vr_.getFieldOfView();
+  }
+
+  /**
+   * Changing the field of view increases or decreases the portion of the video
+   * that is viewed at one time. If the field of view is decreased, a small
+   * part of the video will be seen, but with more detail. If the field of view
+   * is increased, a larger part of the video will be seen, but with less
+   * detail.
+   *
+   * @param {number} fieldOfView In degrees
+   * @export
+   */
+  setVRFieldOfView(fieldOfView) {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    this.vr_.setFieldOfView(fieldOfView);
+  }
+
+  /**
+   * Toggle stereoscopic mode.
+   *
+   * @export
+   */
+  toggleStereoscopicMode() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    this.vr_.toggleStereoscopicMode();
+  }
+
+  /**
+   * Returns true if stereoscopic mode is enabled.
+   *
+   * @return {boolean}
+   */
+  isStereoscopicModeEnabled() {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    return this.vr_.isStereoscopicModeEnabled();
+  }
+
+  /**
+   * Increment the yaw in X angle in degrees.
+   *
+   * @param {number} angle In degrees
+   * @export
+   */
+  incrementYaw(angle) {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    this.vr_.incrementYaw(angle);
+  }
+
+  /**
+   * Increment the pitch in X angle in degrees.
+   *
+   * @param {number} angle In degrees
+   * @export
+   */
+  incrementPitch(angle) {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    this.vr_.incrementPitch(angle);
+  }
+
+  /**
+   * Increment the roll in X angle in degrees.
+   *
+   * @param {number} angle In degrees
+   * @export
+   */
+  incrementRoll(angle) {
+    goog.asserts.assert(this.vr_ != null, 'Should have a VR manager!');
+    this.vr_.incrementRoll(angle);
+  }
+
+  /**
    * Create a localization instance already pre-loaded with all the locales that
    * we support.
    *
@@ -1514,6 +1903,15 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
  * @property {boolean} newStatus
  *  The new status of the application. True for 'is casting' and
  *  false otherwise.
+ * @exportDoc
+ */
+
+
+/**
+ * @event shaka.ui.Controls#VRStatusChangedEvent
+ * @description Fired when VR status change
+ * @property {string} type
+ *   'vrstatuschanged'
  * @exportDoc
  */
 

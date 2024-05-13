@@ -36,6 +36,9 @@ shaka.test.FakeAbrManager = class {
     this.stop = jasmine.createSpy('stop');
 
     /** @type {!jasmine.Spy} */
+    this.release = jasmine.createSpy('release');
+
+    /** @type {!jasmine.Spy} */
     this.enable = jasmine.createSpy('enable');
 
     /** @type {!jasmine.Spy} */
@@ -225,6 +228,9 @@ shaka.test.FakeVideo = class {
 
     /** @type {!jasmine.Spy} */
     this.dispatchEvent = jasmine.createSpy('dispatchEvent');
+
+    /** @type {!jasmine.Spy} */
+    this.canPlayType = jasmine.createSpy('canPlayType');
   }
 };
 
@@ -338,6 +344,9 @@ shaka.test.FakePlayhead = class {
 
     /** @private {number} */
     this.stallsDetected_ = 0;
+
+    /** @type {!jasmine.Spy} */
+    this.ready = jasmine.createSpy('ready');
 
     /** @type {!jasmine.Spy} */
     this.setStartTime = jasmine.createSpy('setStartTime')
@@ -460,6 +469,9 @@ shaka.test.FakeSegmentIndex = class {
     this.updateEvery = jasmine.createSpy('updateEvery');
 
     /** @type {!jasmine.Spy} */
+    this.isEmpty = jasmine.createSpy('updateEvery').and.returnValue(false);
+
+    /** @type {!jasmine.Spy} */
     this[Symbol.iterator] = jasmine.createSpy('Symbol.iterator')
         .and.callFake(() => this.getIteratorForTime(0));
 
@@ -489,25 +501,40 @@ shaka.test.FakeSegmentIndex = class {
               nextPosition = this.find(time);
               return this.get(nextPosition++);
             },
+
+            setReverse: () => {},
           };
         });
   }
 };
 
-/** @extends {shaka.media.Transmuxer} */
+/** @implements {shaka.extern.Transmuxer} */
 shaka.test.FakeTransmuxer = class {
   constructor() {
+    const mp4MimeType = 'video/mp4; codecs="avc1.42E01E"';
+
     const output = {
       data: new Uint8Array(),
       captions: [],
     };
 
     /** @type {!jasmine.Spy} */
-    this.destroy =
-        jasmine.createSpy('destroy').and.returnValue(Promise.resolve());
+    this.destroy = jasmine.createSpy('destroy');
+
+    /** @type {!jasmine.Spy} */
+    this.isSupported =
+        jasmine.createSpy('isSupported').and.returnValue(true);
+
+    /** @type {!jasmine.Spy} */
+    this.convertCodecs =
+        jasmine.createSpy('convertCodecs').and.returnValue(mp4MimeType);
 
     /** @type {!jasmine.Spy} */
     this.transmux =
         jasmine.createSpy('transmux').and.returnValue(Promise.resolve(output));
+
+    /** @type {!jasmine.Spy} */
+    this.getOriginalMimeType =
+        jasmine.createSpy('getOriginalMimeType').and.returnValue('mimeType');
   }
 };
